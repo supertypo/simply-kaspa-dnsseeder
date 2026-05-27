@@ -6,7 +6,7 @@ use dashmap::DashMap;
 use kaspa_core::time::unix_now;
 use kaspa_p2p_lib::common::ProtocolError;
 use kaspa_p2p_lib::pb::{
-    self, AddressesMessage, RequestAddressesMessage, VerackMessage, VersionMessage, kaspad_message::Payload,
+    self, AddressesMessage, ReadyMessage, RequestAddressesMessage, VerackMessage, VersionMessage, kaspad_message::Payload,
 };
 use kaspa_p2p_lib::{
     ConnectionInitializer, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message,
@@ -29,8 +29,6 @@ pub(crate) type PendingMap = Arc<DashMap<std::net::SocketAddr, ProbeChannel>>;
 pub struct ProbeInitializerConfig {
     pub network_id: kaspa_consensus_core::network::NetworkId,
     pub probe_timeout: Duration,
-    pub handshake_timeout: Duration,
-    pub addresses_timeout: Duration,
 }
 
 impl ProbeInitializerConfig {
@@ -38,10 +36,8 @@ impl ProbeInitializerConfig {
     pub fn new(
         network_id: kaspa_consensus_core::network::NetworkId,
         probe_timeout: Duration,
-        handshake_timeout: Duration,
-        addresses_timeout: Duration,
     ) -> Self {
-        Self { network_id, probe_timeout, handshake_timeout, addresses_timeout }
+        Self { network_id, probe_timeout }
     }
 }
 
@@ -62,15 +58,18 @@ impl ProbeInitializer {
     async fn do_probe(&self, router: &Arc<Router>) -> Result<ProbeResult, ProtocolError> {
         let mut version_route = router.subscribe(vec![KaspadMessagePayloadType::Version]);
         let mut verack_route = router.subscribe(vec![KaspadMessagePayloadType::Verack]);
+        let mut ready_route = router.subscribe(vec![KaspadMessagePayloadType::Ready]);
         let mut request_addr_route = router.subscribe(vec![KaspadMessagePayloadType::RequestAddresses]);
         let mut addresses_route = router.subscribe(vec![KaspadMessagePayloadType::Addresses]);
-        // v10 peers may send Ready; drain it so the router's "no subscriber"
-        // path doesn't close the connection on us.
-        let _ready_drain = router.subscribe(vec![KaspadMessagePayloadType::Ready]);
+        // After Ready the peer enters its operational state and starts pushing
+        // relay traffic (InvRelayBlock, Ping, etc.). Without a subscriber the
+        // router treats those as "no flow registered" and closes the socket
+        // before our Addresses arrives — so we drain everything else.
+        let _drain_route = router.subscribe(drain_payload_types());
 
         router.start();
 
-        let timeout = self.config.handshake_timeout;
+        let timeout = self.config.probe_timeout;
 
         // 1. Peer pushes its Version unprompted on connect.
         let peer_version: VersionMessage = dequeue_with_timeout!(version_route, Payload::Version, timeout)?;
@@ -102,14 +101,19 @@ impl ProbeInitializer {
         // 4. Send our Verack.
         router.enqueue(make_message!(Payload::Verack, pb::VerackMessage {})).await?;
 
-        // 5. Peer sends RequestAddresses; reply with an empty Addresses payload.
+        // 5. Ready exchange — kaspa-p2p-lib peers send Ready and wait for ours
+        // (8s peer-side timeout) before they will service any further messages.
+        router.enqueue(make_message!(Payload::Ready, ReadyMessage {})).await?;
+        let _ready: ReadyMessage = dequeue_with_timeout!(ready_route, Payload::Ready, timeout)?;
+
+        // 6. Peer sends RequestAddresses; reply with an empty Addresses payload.
         let _peer_req: RequestAddressesMessage =
             dequeue_with_timeout!(request_addr_route, Payload::RequestAddresses, timeout)?;
         router
             .enqueue(make_message!(Payload::Addresses, pb::AddressesMessage { address_list: vec![] }))
             .await?;
 
-        // 6. Now ask the peer for its address book.
+        // 7. Now ask the peer for its address book.
         router
             .enqueue(make_message!(
                 Payload::RequestAddresses,
@@ -117,8 +121,8 @@ impl ProbeInitializer {
             ))
             .await?;
 
-        // 7. Receive the peer's Addresses.
-        let msg: AddressesMessage = dequeue_with_timeout!(addresses_route, Payload::Addresses, self.config.addresses_timeout)?;
+        // 8. Receive the peer's Addresses.
+        let msg: AddressesMessage = dequeue_with_timeout!(addresses_route, Payload::Addresses, timeout)?;
         let address_list: Vec<(IpAddress, u16)> = msg.try_into()?;
         if address_list.len() > MAX_ADDRESSES_RECEIVE {
             return Err(ProtocolError::OtherOwned(format!(
@@ -162,4 +166,57 @@ impl ConnectionInitializer for ProbeInitializer {
             }
         }
     }
+}
+
+/// Every payload type except the five we explicitly drive in `do_probe`.
+/// Subscribed as a single silent drain so the router does not close the
+/// connection when the peer pushes operational-state traffic.
+fn drain_payload_types() -> Vec<KaspadMessagePayloadType> {
+    use KaspadMessagePayloadType as T;
+    vec![
+        T::Block,
+        T::Transaction,
+        T::BlockLocator,
+        T::RequestRelayBlocks,
+        T::RequestTransactions,
+        T::IbdBlock,
+        T::InvRelayBlock,
+        T::InvTransactions,
+        T::Ping,
+        T::Pong,
+        T::TransactionNotFound,
+        T::Reject,
+        T::PruningPointUtxoSetChunk,
+        T::RequestIbdBlocks,
+        T::UnexpectedPruningPoint,
+        T::IbdBlockLocator,
+        T::IbdBlockLocatorHighestHash,
+        T::RequestNextPruningPointUtxoSetChunk,
+        T::DonePruningPointUtxoSetChunks,
+        T::IbdBlockLocatorHighestHashNotFound,
+        T::BlockWithTrustedData,
+        T::DoneBlocksWithTrustedData,
+        T::RequestPruningPointAndItsAnticone,
+        T::BlockHeaders,
+        T::RequestNextHeaders,
+        T::DoneHeaders,
+        T::RequestPruningPointUtxoSet,
+        T::RequestHeaders,
+        T::RequestBlockLocator,
+        T::PruningPoints,
+        T::RequestPruningPointProof,
+        T::PruningPointProof,
+        T::BlockWithTrustedDataV4,
+        T::TrustedData,
+        T::RequestIbdChainBlockLocator,
+        T::IbdChainBlockLocator,
+        T::RequestAntipast,
+        T::RequestNextPruningPointAndItsAnticoneBlocks,
+        T::BlockBody,
+        T::RequestBlockBodies,
+        T::RequestPruningPointSmtState,
+        T::SmtMetadata,
+        T::SmtLaneChunk,
+        T::RequestNextPruningPointSmtChunk,
+    ]
 }

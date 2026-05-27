@@ -19,8 +19,6 @@ fn defaults_match_spec() {
     let cli = parse(&["--network-id", "kaspa-mainnet"]);
     assert_eq!(cli.threads, 8);
     assert_eq!(cli.probe_timeout, Duration::from_secs(10));
-    assert_eq!(cli.handshake_timeout, Duration::from_secs(5));
-    assert_eq!(cli.addresses_timeout, Duration::from_secs(5));
     assert_eq!(cli.crawl_interval, Duration::from_secs(15 * 60));
     assert_eq!(cli.dead_after, Duration::from_secs(7 * 24 * 60 * 60));
     assert_eq!(cli.dns_listen, "0.0.0.0:53");

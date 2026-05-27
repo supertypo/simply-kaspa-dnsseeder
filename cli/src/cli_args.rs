@@ -22,17 +22,9 @@ pub struct CliArgs {
     #[clap(long, default_value = "8")]
     pub threads: usize,
 
-    /// Maximum total duration of a single probe (handshake + addresses).
+    /// Maximum total duration of a single probe (connect + handshake + addresses).
     #[clap(long, default_value = "10s", value_parser = humantime::parse_duration)]
     pub probe_timeout: Duration,
-
-    /// Timeout for the version handshake.
-    #[clap(long, default_value = "5s", value_parser = humantime::parse_duration)]
-    pub handshake_timeout: Duration,
-
-    /// Timeout for the addresses exchange after handshake.
-    #[clap(long, default_value = "5s", value_parser = humantime::parse_duration)]
-    pub addresses_timeout: Duration,
 
     /// Interval after which a peer is re-probed.
     #[clap(long, default_value = "15m", value_parser = humantime::parse_duration)]

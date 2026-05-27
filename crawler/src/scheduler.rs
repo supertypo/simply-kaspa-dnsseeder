@@ -127,10 +127,12 @@ impl Scheduler {
                     let probe = self.probe.clone();
                     let store = self.store.clone();
                     let in_flight = self.in_flight.clone();
+                    let tx = self.tx.clone();
+                    let default_port = self.config.network_id.default_p2p_port();
                     let dead_after_ms = self.config.dead_after_ms();
                     tokio::spawn(async move {
                         let _permit = permit;
-                        Self::probe_one(probe.as_ref(), &store, addr, dead_after_ms).await;
+                        Self::probe_one(probe.as_ref(), &store, &tx, &in_flight, addr, default_port, dead_after_ms).await;
                         in_flight.remove(&addr);
                     });
                 }
@@ -214,14 +216,43 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Probe a single peer and apply the outcome to the store. Visible to the
-    /// `web` crate via [`crate::Probe`] so the same primitive backs both the
-    /// scheduler and direct HTTP-submitted probes.
-    pub(crate) async fn probe_one(probe: &dyn Probe, store: &PeerStore, addr: SocketAddr, _dead_after_ms: i64) {
+    /// Probe a single peer, apply the outcome to the store, and enqueue any
+    /// freshly discovered addresses for further crawling.
+    pub(crate) async fn probe_one(
+        probe: &dyn Probe,
+        store: &PeerStore,
+        tx: &mpsc::Sender<SocketAddr>,
+        in_flight: &DashSet<SocketAddr>,
+        addr: SocketAddr,
+        default_port: u16,
+        _dead_after_ms: i64,
+    ) {
         match probe.probe(addr).await {
             Ok(result) => {
                 if let Err(err) = apply_success(store, addr, &result) {
                     warn!("crawler: failed to persist successful probe of {addr}: {err}");
+                }
+                let discovered = result.addresses.len();
+                let mut enqueued = 0usize;
+                for (ip_addr, port) in &result.addresses {
+                    let port = if *port == 0 { default_port } else { *port };
+                    let ip: std::net::IpAddr = (*ip_addr).into();
+                    let canonical = canonicalize_ip(ip);
+                    if !is_routable(canonical) {
+                        continue;
+                    }
+                    let new_addr = SocketAddr::new(canonical, port);
+                    if !in_flight.insert(new_addr) {
+                        continue;
+                    }
+                    if tx.try_send(new_addr).is_err() {
+                        in_flight.remove(&new_addr);
+                        break;
+                    }
+                    enqueued += 1;
+                }
+                if discovered > 0 {
+                    debug!("crawler: {addr} advertised {discovered} address(es), enqueued {enqueued} new");
                 }
             }
             Err(err) => {
@@ -230,6 +261,20 @@ impl Scheduler {
                     warn!("crawler: failed to bump last_attempt for {addr}: {err}");
                 }
             }
+        }
+    }
+}
+
+fn is_routable(ip: IpAddr) -> bool {
+    if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() {
+        return false;
+    }
+    match ip {
+        IpAddr::V4(v4) => !(v4.is_private() || v4.is_link_local() || v4.is_broadcast() || v4.is_documentation()),
+        IpAddr::V6(v6) => {
+            let seg = v6.segments()[0];
+            // fc00::/7 unique local, fe80::/10 link-local
+            !((seg & 0xfe00) == 0xfc00 || (seg & 0xffc0) == 0xfe80)
         }
     }
 }
