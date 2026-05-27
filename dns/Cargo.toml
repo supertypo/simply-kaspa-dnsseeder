@@ -21,6 +21,8 @@ tokio.workspace = true
 async-trait.workspace = true
 log.workspace = true
 thiserror.workspace = true
+rand.workspace = true
+dashmap.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -10,6 +10,7 @@
 pub mod config;
 pub mod error;
 pub mod handler;
+pub mod rate_limit;
 pub mod server;
 
 #[cfg(test)]

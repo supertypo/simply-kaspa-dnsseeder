@@ -1,7 +1,3 @@
-//! Wire up the [`SeederHandler`] to a UDP + TCP `ServerFuture`.
-
-use std::time::Duration;
-
 use hickory_server::ServerFuture;
 use log::info;
 use simply_kaspa_dnsseeder_store::PeerStore;
@@ -11,15 +7,13 @@ use crate::config::DnsConfig;
 use crate::error::Error;
 use crate::handler::SeederHandler;
 
-/// Bind UDP+TCP on `config.dns_listen` and serve until `shutdown` fires.
-/// A bind failure is propagated, not swallowed; the binary turns this into a
-/// hard exit so operators notice misconfiguration.
 pub async fn run_dns_server(
     config: DnsConfig,
     store: PeerStore,
     mut shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), Error> {
     let listen = config.dns_listen;
+    let tcp_idle = config.tcp_idle_timeout;
     let handler = SeederHandler::new(config, store)?;
 
     let mut server = ServerFuture::new(handler);
@@ -29,7 +23,7 @@ pub async fn run_dns_server(
 
     let tcp = TcpListener::bind(listen).await?;
     info!("dns: tcp listening on {listen}");
-    server.register_listener(tcp, Duration::from_secs(5));
+    server.register_listener(tcp, tcp_idle);
 
     let _ = shutdown.recv().await;
     info!("dns: shutdown signal received");

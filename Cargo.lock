@@ -3137,11 +3137,13 @@ name = "simply-kaspa-dnsseeder-dns"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "dashmap",
  "hickory-proto",
  "hickory-resolver",
  "hickory-server",
  "kaspa-consensus-core",
  "log",
+ "rand 0.8.6",
  "simply-kaspa-dnsseeder-store",
  "tempfile",
  "thiserror 2.0.18",
