@@ -1,0 +1,36 @@
+[package]
+name = "simply-kaspa-dnsseeder-crawler"
+version = "0.1.0"
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+name = "simply_kaspa_dnsseeder_crawler"
+
+[dependencies]
+simply-kaspa-dnsseeder-store.workspace = true
+
+kaspa-p2p-lib.workspace = true
+kaspa-consensus-core.workspace = true
+kaspa-utils.workspace = true
+kaspa-utils-tower.workspace = true
+kaspa-core.workspace = true
+
+tokio.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+log.workspace = true
+thiserror.workspace = true
+hex.workspace = true
+chrono.workspace = true
+serde.workspace = true
+dashmap.workspace = true
+uuid.workspace = true
+parking_lot.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full", "test-util", "macros"] }

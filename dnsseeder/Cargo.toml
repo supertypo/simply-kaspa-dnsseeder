@@ -1,0 +1,26 @@
+[package]
+name = "simply-kaspa-dnsseeder"
+version = "0.1.0"
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "simply-kaspa-dnsseeder"
+path = "src/main.rs"
+
+[dependencies]
+simply-kaspa-dnsseeder-cli.workspace = true
+simply-kaspa-dnsseeder-store.workspace = true
+simply-kaspa-dnsseeder-crawler.workspace = true
+simply-kaspa-dnsseeder-dns.workspace = true
+simply-kaspa-dnsseeder-web.workspace = true
+
+kaspa-consensus-core.workspace = true
+
+tokio.workspace = true
+log.workspace = true
+env_logger.workspace = true
+clap.workspace = true
+anyhow.workspace = true

@@ -1,0 +1,88 @@
+[workspace]
+resolver = "2"
+members = [
+    "cli",
+    "store",
+    "crawler",
+    "dns",
+    "web",
+    "dnsseeder",
+]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+lto = "thin"
+strip = true
+overflow-checks = true
+panic = "abort"
+
+[workspace.package]
+rust-version = "1.93.1"
+authors = ["simply-kaspa-dnsseeder contributors"]
+license = "ISC"
+edition = "2024"
+
+[workspace.dependencies]
+# Internal crates
+simply-kaspa-dnsseeder-cli = { path = "cli" }
+simply-kaspa-dnsseeder-store = { path = "store" }
+simply-kaspa-dnsseeder-crawler = { path = "crawler" }
+simply-kaspa-dnsseeder-dns = { path = "dns" }
+simply-kaspa-dnsseeder-web = { path = "web" }
+
+# Kaspa / rusty-kaspa (pinned to tn10-toc3)
+kaspa-p2p-lib = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
+kaspa-consensus-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
+kaspa-utils = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
+kaspa-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
+kaspa-hashes = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
+kaspa-utils-tower = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
+
+# Async runtime + utilities
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+parking_lot = "0.12"
+
+# HTTP server
+axum = { version = "0.8", features = ["http1", "json", "tokio"] }
+tower-http = { version = "0.6", features = ["cors"] }
+tower = "0.5"
+
+# DNS server
+hickory-server = { version = "0.25", features = ["resolver"] }
+hickory-proto = "0.25"
+hickory-resolver = "0.25"
+
+# Persistence
+redb = "2"
+bincode = { version = "2", features = ["serde"] }
+
+# Serialization & logging
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_bytes = "0.11"
+env_logger = "0.11"
+log = "0.4"
+
+# CLI / time / misc
+clap = { version = "4", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+humantime = "2"
+humantime-serde = "1"
+semver = "1"
+dashmap = "6"
+hex = "0.4"
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+thiserror = "2"
+anyhow = "1"
+
+# Build info
+vergen-git2 = "1"
+
+# Test-only
+tempfile = "3"
+tokio-test = "0.4"

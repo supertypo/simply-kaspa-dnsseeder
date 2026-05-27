@@ -1,0 +1,32 @@
+[package]
+name = "simply-kaspa-dnsseeder-web"
+version = "0.1.0"
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+name = "simply_kaspa_dnsseeder_web"
+
+[dependencies]
+simply-kaspa-dnsseeder-store.workspace = true
+simply-kaspa-dnsseeder-crawler.workspace = true
+
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+
+tokio.workspace = true
+async-trait.workspace = true
+log.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+dashmap.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio = { workspace = true, features = ["full", "test-util", "macros"] }
+tower = { workspace = true, features = ["util"] }

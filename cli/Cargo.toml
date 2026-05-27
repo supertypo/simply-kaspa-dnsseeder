@@ -1,0 +1,22 @@
+[package]
+name = "simply-kaspa-dnsseeder-cli"
+version = "0.1.0"
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+build = "build.rs"
+
+[lib]
+name = "simply_kaspa_dnsseeder_cli"
+
+[build-dependencies]
+vergen-git2.workspace = true
+
+[dependencies]
+clap.workspace = true
+humantime.workspace = true
+humantime-serde.workspace = true
+serde.workspace = true
+semver.workspace = true
+thiserror.workspace = true
