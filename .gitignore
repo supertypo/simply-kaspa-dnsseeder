@@ -2,4 +2,4 @@
 .vscode/
 *.iml
 target/
-/docker-compose.yaml
+data/

@@ -1,10 +1,3 @@
-//! The [`ConnectionInitializer`] used by the crawler.
-//!
-//! For every outbound connection it performs the kaspa handshake, fires a
-//! `RequestAddresses` and waits up to `addresses_timeout` for the matching
-//! `Addresses` response. The outcome is forwarded to the originating
-//! [`crate::probe::KaspadProbe`] via the per-address oneshot map.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,9 +5,11 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use kaspa_core::time::unix_now;
 use kaspa_p2p_lib::common::ProtocolError;
-use kaspa_p2p_lib::pb::{self, AddressesMessage, RequestAddressesMessage, VersionMessage, kaspad_message::Payload};
+use kaspa_p2p_lib::pb::{
+    self, AddressesMessage, RequestAddressesMessage, VerackMessage, VersionMessage, kaspad_message::Payload,
+};
 use kaspa_p2p_lib::{
-    ConnectionInitializer, KaspadHandshake, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message,
+    ConnectionInitializer, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message,
 };
 use kaspa_utils::networking::IpAddress;
 use log::{debug, trace, warn};
@@ -25,32 +20,28 @@ use crate::error::ProbeError;
 use crate::model::ProbeResult;
 
 const MAX_ADDRESSES_RECEIVE: usize = 2500;
+const USER_AGENT: &str = "/simply-kaspa-dnsseeder:0.1.0/";
 
-/// Routing key for an in-flight probe: the peer's `SocketAddr` as reported by
-/// [`Router::net_address`].
 pub(crate) type ProbeChannel = oneshot::Sender<Result<ProbeResult, ProbeError>>;
 pub(crate) type PendingMap = Arc<DashMap<std::net::SocketAddr, ProbeChannel>>;
 
-/// Configuration shared between the scheduler and the initializer.
 #[derive(Debug, Clone)]
 pub struct ProbeInitializerConfig {
     pub network_id: kaspa_consensus_core::network::NetworkId,
+    pub probe_timeout: Duration,
     pub handshake_timeout: Duration,
     pub addresses_timeout: Duration,
-    /// Protocol version advertised in our `VersionMessage`. We use the highest
-    /// version `kaspa-p2p-lib` from `tn10-toc3` supports (7) so the peer
-    /// negotiates the most recent flow set.
-    pub our_protocol_version: u32,
 }
 
 impl ProbeInitializerConfig {
     #[must_use]
     pub fn new(
         network_id: kaspa_consensus_core::network::NetworkId,
+        probe_timeout: Duration,
         handshake_timeout: Duration,
         addresses_timeout: Duration,
     ) -> Self {
-        Self { network_id, handshake_timeout, addresses_timeout, our_protocol_version: 7 }
+        Self { network_id, probe_timeout, handshake_timeout, addresses_timeout }
     }
 }
 
@@ -65,33 +56,24 @@ impl ProbeInitializer {
         Self { config, pending }
     }
 
-    fn build_version_message(&self) -> VersionMessage {
-        pb::VersionMessage {
-            protocol_version: self.config.our_protocol_version,
-            services: 0,
-            timestamp: unix_now() as i64,
-            address: None,
-            id: Vec::from(Uuid::new_v4().as_bytes()),
-            user_agent: "/simply-kaspa-dnsseeder:0.1.0/".to_string(),
-            disable_relay_tx: true,
-            subnetwork_id: None,
-            network: self.config.network_id.to_prefixed(),
-        }
-    }
-
+    /// Go-dnsseeder style handshake: read the peer's `Version` first, mirror
+    /// `protocol_version` and `services` back so we are compatible with both
+    /// v7 and v10 mainnet peers without picking a fixed local version.
     async fn do_probe(&self, router: &Arc<Router>) -> Result<ProbeResult, ProtocolError> {
-        let mut handshake = KaspadHandshake::new(router);
-        let addresses_route = router.subscribe(vec![KaspadMessagePayloadType::Addresses]);
-        // We don't speak the full v7 flow set; subscribe to common request types just so
-        // the receive loop has consumers (avoids "no subscriber" errors closing the router).
-        let _request_addresses_drain = router.subscribe(vec![KaspadMessagePayloadType::RequestAddresses]);
+        let mut version_route = router.subscribe(vec![KaspadMessagePayloadType::Version]);
+        let mut verack_route = router.subscribe(vec![KaspadMessagePayloadType::Verack]);
+        let mut request_addr_route = router.subscribe(vec![KaspadMessagePayloadType::RequestAddresses]);
+        let mut addresses_route = router.subscribe(vec![KaspadMessagePayloadType::Addresses]);
+        // v10 peers may send Ready; drain it so the router's "no subscriber"
+        // path doesn't close the connection on us.
+        let _ready_drain = router.subscribe(vec![KaspadMessagePayloadType::Ready]);
 
         router.start();
 
-        let peer_version = tokio::time::timeout(self.config.handshake_timeout, handshake.handshake(self.build_version_message()))
-            .await
-            .map_err(|_| ProtocolError::Timeout(self.config.handshake_timeout))??;
+        let timeout = self.config.handshake_timeout;
 
+        // 1. Peer pushes its Version unprompted on connect.
+        let peer_version: VersionMessage = dequeue_with_timeout!(version_route, Payload::Version, timeout)?;
         debug!(
             "probe {}: peer version protocol={} ua={:?} network={}",
             router.net_address(),
@@ -100,21 +82,48 @@ impl ProbeInitializer {
             peer_version.network,
         );
 
-        handshake.exchange_ready_messages().await?;
+        // 2. Reply with a Version that mirrors the peer's protocol_version + services.
+        let our_version = pb::VersionMessage {
+            protocol_version: peer_version.protocol_version,
+            services: peer_version.services,
+            timestamp: unix_now() as i64,
+            address: None,
+            id: Vec::from(Uuid::new_v4().as_bytes()),
+            user_agent: USER_AGENT.to_string(),
+            disable_relay_tx: true,
+            subnetwork_id: None,
+            network: self.config.network_id.to_prefixed(),
+        };
+        router.enqueue(make_message!(Payload::Version, our_version)).await?;
 
+        // 3. Receive peer's Verack.
+        let _verack: VerackMessage = dequeue_with_timeout!(verack_route, Payload::Verack, timeout)?;
+
+        // 4. Send our Verack.
+        router.enqueue(make_message!(Payload::Verack, pb::VerackMessage {})).await?;
+
+        // 5. Peer sends RequestAddresses; reply with an empty Addresses payload.
+        let _peer_req: RequestAddressesMessage =
+            dequeue_with_timeout!(request_addr_route, Payload::RequestAddresses, timeout)?;
         router
-            .enqueue(make_message!(Payload::RequestAddresses, RequestAddressesMessage { include_all_subnetworks: false, subnetwork_id: None }))
+            .enqueue(make_message!(Payload::Addresses, pb::AddressesMessage { address_list: vec![] }))
             .await?;
 
-        let mut addresses_route = addresses_route;
-        let msg: AddressesMessage =
-            dequeue_with_timeout!(addresses_route, Payload::Addresses, self.config.addresses_timeout)?;
+        // 6. Now ask the peer for its address book.
+        router
+            .enqueue(make_message!(
+                Payload::RequestAddresses,
+                RequestAddressesMessage { include_all_subnetworks: true, subnetwork_id: None }
+            ))
+            .await?;
+
+        // 7. Receive the peer's Addresses.
+        let msg: AddressesMessage = dequeue_with_timeout!(addresses_route, Payload::Addresses, self.config.addresses_timeout)?;
         let address_list: Vec<(IpAddress, u16)> = msg.try_into()?;
         if address_list.len() > MAX_ADDRESSES_RECEIVE {
             return Err(ProtocolError::OtherOwned(format!(
-                "address count {} exceeded {}",
+                "address count {} exceeded {MAX_ADDRESSES_RECEIVE}",
                 address_list.len(),
-                MAX_ADDRESSES_RECEIVE
             )));
         }
         trace!("probe {}: received {} addresses", router.net_address(), address_list.len());
@@ -128,18 +137,16 @@ impl ConnectionInitializer for ProbeInitializer {
     async fn initialize_connection(&self, router: Arc<Router>) -> Result<(), ProtocolError> {
         let addr = router.net_address();
         let result = self.do_probe(&router).await;
-
         let sender = self.pending.remove(&addr).map(|(_, tx)| tx);
+        // Close the router promptly so post-handshake relay traffic does not keep
+        // arriving and the connection is torn down before we hand back control.
+        router.close().await;
 
         match result {
             Ok(probe_result) => {
                 if let Some(tx) = sender {
                     let _ = tx.send(Ok(probe_result));
                 }
-                // We don't need the connection any longer; closing the router
-                // here would race with the connection_handler tearing it down,
-                // so we let `KaspadProbe::probe` call `adaptor.terminate` once
-                // it observes the success.
                 Ok(())
             }
             Err(err) => {

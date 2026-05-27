@@ -48,7 +48,7 @@ async fn run(cli: CliArgs) -> Result<()> {
 
     let known_peers = parse_socket_addrs(&cli.known_peers)?;
 
-    let probe_cfg = ProbeInitializerConfig::new(network_id, cli.handshake_timeout, cli.addresses_timeout);
+    let probe_cfg = ProbeInitializerConfig::new(network_id, cli.probe_timeout, cli.handshake_timeout, cli.addresses_timeout);
     let probe = Arc::new(KaspadProbe::new(probe_cfg));
 
     let scheduler_cfg = SchedulerConfig {
