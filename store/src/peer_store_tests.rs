@@ -226,7 +226,8 @@ fn summary_v4_v6_counts_only_good_subset() {
     assert_eq!(s.good, 3, "good = 2 v4 + 1 v6 within window");
     assert_eq!(s.v4, 2, "v4 counts only good subset");
     assert_eq!(s.v6, 1, "v6 counts only good subset");
-    assert_eq!(s.failed, 2, "stale-good + never-succeeded both count as failed");
+    assert_eq!(s.stale, 1, "r3 succeeded before but is past stale_good window");
+    assert_eq!(s.failed, 1, "r4 never succeeded");
 }
 
 #[test]

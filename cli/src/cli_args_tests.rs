@@ -20,7 +20,7 @@ fn defaults_match_spec() {
     assert_eq!(cli.threads, 8);
     assert_eq!(cli.probe_timeout, Duration::from_secs(8));
     assert_eq!(cli.probe_tick, Duration::from_secs(10));
-    assert_eq!(cli.stale_good, Duration::from_secs(15 * 60));
+    assert_eq!(cli.stale_good, Duration::from_secs(30 * 60));
     assert_eq!(cli.stale_bad, Duration::from_secs(2 * 60 * 60));
     assert_eq!(cli.dead_after, Duration::from_secs(7 * 24 * 60 * 60));
     assert_eq!(cli.dns_listen, vec!["0.0.0.0:53".parse().unwrap(), "[::]:53".parse().unwrap()]);

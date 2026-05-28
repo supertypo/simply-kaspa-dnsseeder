@@ -30,7 +30,7 @@ pub struct CliArgs {
     pub probe_tick: Duration,
 
     /// Re-probe interval for peers that have succeeded at least once.
-    #[clap(long, default_value = "15m", value_parser = humantime::parse_duration)]
+    #[clap(long, default_value = "30m", value_parser = humantime::parse_duration)]
     pub stale_good: Duration,
 
     /// Re-probe interval for peers that have never succeeded.

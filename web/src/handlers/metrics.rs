@@ -36,6 +36,7 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
         "peers": {
             "total": summary.total,
             "good": summary.good,
+            "stale": summary.stale,
             "failed": summary.failed,
             "v4": summary.v4,
             "v6": summary.v6,

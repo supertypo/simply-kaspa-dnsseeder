@@ -21,6 +21,9 @@ const KV: TableDefinition<&str, &[u8]> = TableDefinition::new("kv_v1");
 pub struct StoreSummary {
     pub total: u64,
     pub good: u64,
+    /// Peers that previously succeeded but whose `last_success_ms` is older than `stale_good_ms`.
+    pub stale: u64,
+    /// Peers that have never succeeded (`last_success_ms <= 0`).
     pub failed: u64,
     /// Count of good IPv4 peers (subset of `good`).
     pub v4: u64,
@@ -358,7 +361,8 @@ impl PeerStore {
     }
 
     /// Compute an aggregate summary of all stored peers in a single read pass.
-    /// A peer is "good" iff `last_success_ms > 0` and `now_ms - last_success_ms <= stale_good_ms`.
+    /// A peer is "good" iff `last_success_ms > 0` and `now_ms - last_success_ms <= stale_good_ms`,
+    /// "stale" iff it has succeeded before but aged past that window, and "failed" iff it has never succeeded.
     /// `v4` / `v6` count only the "good" subset.
     pub fn summary(&self, now_ms: i64, stale_good_ms: i64) -> Result<StoreSummary, Error> {
         let mut s = StoreSummary::default();
@@ -384,7 +388,7 @@ impl PeerStore {
                     sum_age_ms += u128::from(u64::try_from(age).unwrap_or(0));
                 }
             } else {
-                s.failed += 1;
+                s.stale += 1;
             }
         }
         if s.good > 0 {

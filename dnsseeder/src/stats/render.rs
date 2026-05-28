@@ -16,8 +16,8 @@ pub(super) struct Block {
     pub uptime: Duration,
     pub network: NetworkId,
     pub version: &'static str,
-    pub summary_total: u64,
     pub summary_good: u64,
+    pub summary_stale: u64,
     pub summary_failed: u64,
     pub summary_v4: u64,
     pub summary_v6: u64,
@@ -44,10 +44,10 @@ pub(super) fn render(b: &Block) -> Vec<String> {
         "peers",
         "good",
         &count(b.summary_good),
+        "stale",
+        &count(b.summary_stale),
         "failed",
         &count(b.summary_failed),
-        "total",
-        &count(b.summary_total),
     ));
     out.push(row(
         "",
