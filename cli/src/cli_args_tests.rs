@@ -19,7 +19,9 @@ fn defaults_match_spec() {
     let cli = parse(&["--network-id", "kaspa-mainnet"]);
     assert_eq!(cli.threads, 8);
     assert_eq!(cli.probe_timeout, Duration::from_secs(10));
-    assert_eq!(cli.crawl_interval, Duration::from_secs(15 * 60));
+    assert_eq!(cli.probe_tick, Duration::from_secs(10));
+    assert_eq!(cli.stale_good, Duration::from_secs(15 * 60));
+    assert_eq!(cli.stale_bad, Duration::from_secs(2 * 60 * 60));
     assert_eq!(cli.dead_after, Duration::from_secs(7 * 24 * 60 * 60));
     assert_eq!(cli.dns_listen, "0.0.0.0:53");
     assert_eq!(cli.http_listen, "127.0.0.1:8080");
@@ -57,12 +59,18 @@ fn humantime_durations_parse() {
     let cli = parse(&[
         "--network-id",
         "kaspa-mainnet",
-        "--crawl-interval",
+        "--probe-tick",
+        "5s",
+        "--stale-good",
         "1h30m",
+        "--stale-bad",
+        "4h",
         "--dead-after",
         "30d",
     ]);
-    assert_eq!(cli.crawl_interval, Duration::from_secs(90 * 60));
+    assert_eq!(cli.probe_tick, Duration::from_secs(5));
+    assert_eq!(cli.stale_good, Duration::from_secs(90 * 60));
+    assert_eq!(cli.stale_bad, Duration::from_secs(4 * 60 * 60));
     assert_eq!(cli.dead_after, Duration::from_secs(30 * 24 * 60 * 60));
 }
 

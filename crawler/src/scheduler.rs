@@ -1,4 +1,16 @@
 //! Concurrent scheduler driving peer probes.
+//!
+//! Design:
+//! - The discovery loop in [`Scheduler::probe_one`] only writes to the store
+//!   (creates a stub via [`PeerStore::insert_stub_if_missing`]) when a probed
+//!   peer advertises new addresses. It does NOT enqueue probes.
+//! - A periodic ticker ([`SchedulerConfig::probe_tick`], default 10s) drives
+//!   [`Scheduler::enqueue_probes`], which scans the store for eligible peers,
+//!   picks a random batch of up to `threads * BATCH_PER_THREAD`, and spawns
+//!   probes bounded by a semaphore.
+//! - Two-tier reprobe cadence (mirroring the Go dnsseeder): peers that have
+//!   succeeded at least once are re-probed every `stale_good` (default 15m);
+//!   peers that never succeeded are re-probed every `stale_bad` (default 2h).
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -7,20 +19,31 @@ use std::time::Duration;
 use dashmap::DashSet;
 use kaspa_consensus_core::network::NetworkId;
 use log::{debug, info, warn};
+use rand::seq::SliceRandom;
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
-use tokio::sync::{Semaphore, broadcast, mpsc};
+use tokio::sync::{Semaphore, broadcast};
 
 use crate::error::Error;
 use crate::model::{ProbeResult, canonicalize_ip, is_acceptable_address, now_ms, peer_record_from_version};
 use crate::probe::Probe;
 use crate::seeders::{Resolver, dns_seed_many};
 
+/// Maximum probes dispatched per `probe_tick` per configured thread.
+pub(crate) const BATCH_PER_THREAD: usize = 10;
+/// Pruning runs on this fixed cadence (matches Go dnsseeder).
+const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
+
 /// Static configuration for the scheduler.
 #[derive(Debug, Clone)]
 pub struct SchedulerConfig {
     pub network_id: NetworkId,
     pub threads: usize,
-    pub crawl_interval: Duration,
+    /// How often `enqueue_probes` scans the store for eligible peers.
+    pub probe_tick: Duration,
+    /// Re-probe interval for peers that have succeeded at least once.
+    pub stale_good: Duration,
+    /// Re-probe interval for peers that have never succeeded.
+    pub stale_bad: Duration,
     pub dead_after: Duration,
     /// Explicit DNS seeder hosts (`--seeder`), tried at bootstrap if non-empty.
     pub seeders: Vec<String>,
@@ -33,8 +56,12 @@ impl SchedulerConfig {
         i64::try_from(self.dead_after.as_millis()).unwrap_or(i64::MAX)
     }
 
-    fn crawl_interval_ms(&self) -> i64 {
-        i64::try_from(self.crawl_interval.as_millis()).unwrap_or(i64::MAX)
+    fn stale_good_ms(&self) -> i64 {
+        i64::try_from(self.stale_good.as_millis()).unwrap_or(i64::MAX)
+    }
+
+    fn stale_bad_ms(&self) -> i64 {
+        i64::try_from(self.stale_bad.as_millis()).unwrap_or(i64::MAX)
     }
 }
 
@@ -43,28 +70,24 @@ pub struct Scheduler {
     store: PeerStore,
     probe: Arc<dyn Probe>,
     resolver: Arc<dyn Resolver>,
-    tx: mpsc::Sender<SocketAddr>,
-    rx: mpsc::Receiver<SocketAddr>,
     in_flight: Arc<DashSet<SocketAddr>>,
+    semaphore: Arc<Semaphore>,
 }
 
 impl Scheduler {
     #[must_use]
     pub fn new(config: SchedulerConfig, store: PeerStore, probe: Arc<dyn Probe>, resolver: Arc<dyn Resolver>) -> Self {
-        // Queue capacity tuned to comfortably absorb a full re-probe sweep
-        // without blocking the ticker even on a small `--threads` setting.
-        let (tx, rx) = mpsc::channel(8192);
-        Self { config, store, probe, resolver, tx, rx, in_flight: Arc::new(DashSet::new()) }
+        let semaphore = Arc::new(Semaphore::new(config.threads.max(1)));
+        Self { config, store, probe, resolver, in_flight: Arc::new(DashSet::new()), semaphore }
     }
 
     /// Run the scheduler. Returns when `shutdown` fires.
-    pub async fn run(mut self, mut shutdown: broadcast::Receiver<()>) -> Result<(), Error> {
+    pub async fn run(self, mut shutdown: broadcast::Receiver<()>) -> Result<(), Error> {
         self.bootstrap().await?;
 
-        let semaphore = Arc::new(Semaphore::new(self.config.threads.max(1)));
-        let mut reprobe_ticker = tokio::time::interval(self.config.crawl_interval);
-        reprobe_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut prune_ticker = tokio::time::interval(self.config.crawl_interval);
+        let mut probe_ticker = tokio::time::interval(self.config.probe_tick);
+        probe_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut prune_ticker = tokio::time::interval(PRUNE_INTERVAL);
         prune_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         prune_ticker.tick().await;
 
@@ -74,9 +97,9 @@ impl Scheduler {
                     info!("crawler: shutdown signal received");
                     break;
                 }
-                _ = reprobe_ticker.tick() => {
-                    if let Err(err) = self.enqueue_reprobes().await {
-                        warn!("crawler: re-probe enqueue failed: {err}");
+                _ = probe_ticker.tick() => {
+                    if let Err(err) = self.enqueue_probes().await {
+                        warn!("crawler: probe enqueue failed: {err}");
                     }
                 }
                 _ = prune_ticker.tick() => {
@@ -86,21 +109,6 @@ impl Scheduler {
                         Ok(_) => {}
                         Err(err) => warn!("crawler: prune failed: {err}"),
                     }
-                }
-                maybe = self.rx.recv() => {
-                    let Some(addr) = maybe else { break };
-                    let Ok(permit) = semaphore.clone().acquire_owned().await else { break };
-                    let probe = self.probe.clone();
-                    let store = self.store.clone();
-                    let in_flight = self.in_flight.clone();
-                    let tx = self.tx.clone();
-                    let default_port = self.config.network_id.default_p2p_port();
-                    let strict_port = self.config.strict_port;
-                    tokio::spawn(async move {
-                        let _permit = permit;
-                        Self::probe_one(probe.as_ref(), &store, &tx, &in_flight, addr, default_port, strict_port).await;
-                        in_flight.remove(&addr);
-                    });
                 }
             }
         }
@@ -123,23 +131,22 @@ impl Scheduler {
         };
 
         let default_port = self.config.network_id.default_p2p_port();
+        let now = now_ms();
+        let mut inserted = 0usize;
         for addr in bootstrap_addrs {
             let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
             if !is_acceptable_address(&net, default_port, self.config.strict_port) {
                 debug!("crawler: rejected bootstrap address {addr}");
                 continue;
             }
-            let canonical_addr = SocketAddr::new(net.ip, net.port);
-            if !self.in_flight.insert(canonical_addr) {
-                continue;
+            match self.store.insert_stub_if_missing(&net, now) {
+                Ok(true) => inserted += 1,
+                Ok(false) => {}
+                Err(err) => warn!("crawler: failed to insert bootstrap stub for {addr}: {err}"),
             }
-            if let Err(err) = self.store.record_attempt(&net, now_ms()) {
-                warn!("crawler: failed to record bootstrap attempt for {canonical_addr}: {err}");
-            }
-            if self.tx.send(canonical_addr).await.is_err() {
-                self.in_flight.remove(&canonical_addr);
-                break;
-            }
+        }
+        if inserted > 0 {
+            info!("crawler: bootstrap inserted {inserted} address stub(s)");
         }
         Ok(())
     }
@@ -156,53 +163,67 @@ impl Scheduler {
         out
     }
 
-    async fn enqueue_reprobes(&self) -> Result<(), Error> {
+    /// Scan the store for eligible peers, randomly select up to
+    /// `threads * BATCH_PER_THREAD`, and dispatch probes through the semaphore.
+    async fn enqueue_probes(&self) -> Result<(), Error> {
         let now = now_ms();
-        let interval_ms = self.config.crawl_interval_ms();
         let dead_cutoff = now.saturating_sub(self.config.dead_after_ms());
+        let stale_good_ms = self.config.stale_good_ms();
+        let stale_bad_ms = self.config.stale_bad_ms();
         let default_port = self.config.network_id.default_p2p_port();
-        let records = self.store.iter_all()?;
-        let mut count = 0;
-        for rec in records {
-            if !is_acceptable_address(&rec.address, default_port, self.config.strict_port) {
-                continue;
-            }
-            // Skip records that are going to be pruned anyway. This matches
-            // `PeerStore::prune_dead`'s definition of "dead": stale for
-            // previously-seen peers, or never-seen-and-too-old for stubs.
-            if rec.last_seen_ms < dead_cutoff && rec.first_seen_ms < dead_cutoff {
-                continue;
-            }
-            // Backoff: don't probe more often than `crawl_interval`.
-            if now.saturating_sub(rec.last_attempt_ms) < interval_ms {
-                continue;
-            }
-            let addr = SocketAddr::new(rec.address.ip, rec.address.port);
+        let strict_port = self.config.strict_port;
+
+        let mut eligible: Vec<NetAddress> = self
+            .store
+            .iter_all()?
+            .into_iter()
+            .filter(|rec| {
+                is_eligible(rec, now, stale_good_ms, stale_bad_ms, dead_cutoff)
+                    && is_acceptable_address(&rec.address, default_port, strict_port)
+                    && !self.in_flight.contains(&SocketAddr::new(rec.address.ip, rec.address.port))
+            })
+            .map(|rec| rec.address)
+            .collect();
+
+        if eligible.is_empty() {
+            return Ok(());
+        }
+
+        let batch_max = self.config.threads.max(1).saturating_mul(BATCH_PER_THREAD);
+        {
+            let mut rng = rand::thread_rng();
+            eligible.shuffle(&mut rng);
+        }
+        eligible.truncate(batch_max);
+
+        let count = eligible.len();
+        for net in eligible {
+            let addr = SocketAddr::new(net.ip, net.port);
             if !self.in_flight.insert(addr) {
                 continue;
             }
-            if let Err(err) = self.store.record_attempt(&rec.address, now) {
-                warn!("crawler: failed to record reprobe attempt for {addr}: {err}");
+            if let Err(err) = self.store.record_attempt(&net, now) {
+                warn!("crawler: failed to record attempt for {addr}: {err}");
             }
-            if self.tx.send(addr).await.is_err() {
-                self.in_flight.remove(&addr);
-                break;
-            }
-            count += 1;
+            let Ok(permit) = self.semaphore.clone().acquire_owned().await else { break };
+            let probe = self.probe.clone();
+            let store = self.store.clone();
+            let in_flight = self.in_flight.clone();
+            tokio::spawn(async move {
+                let _permit = permit;
+                Self::probe_one(probe.as_ref(), &store, addr, default_port, strict_port).await;
+                in_flight.remove(&addr);
+            });
         }
-        if count > 0 {
-            debug!("crawler: enqueued {count} address(es) for re-probe");
-        }
+        debug!("crawler: dispatched {count} probe(s) this tick");
         Ok(())
     }
 
-    /// Probe a single peer, apply the outcome to the store, and enqueue any
-    /// freshly discovered addresses for further crawling.
+    /// Probe a single peer, apply the outcome to the store, and record any
+    /// freshly discovered addresses as stubs for the next scheduling tick.
     pub(crate) async fn probe_one(
         probe: &dyn Probe,
         store: &PeerStore,
-        tx: &mpsc::Sender<SocketAddr>,
-        in_flight: &DashSet<SocketAddr>,
         addr: SocketAddr,
         default_port: u16,
         strict_port: bool,
@@ -213,7 +234,8 @@ impl Scheduler {
                     warn!("crawler: failed to persist successful probe of {addr}: {err}");
                 }
                 let discovered = result.addresses.len();
-                let mut enqueued = 0usize;
+                let mut new_stubs = 0usize;
+                let now = now_ms();
                 for (ip_addr, port) in &result.addresses {
                     let port = if *port == 0 { default_port } else { *port };
                     let ip: std::net::IpAddr = (*ip_addr).into();
@@ -222,31 +244,43 @@ impl Scheduler {
                     if !is_acceptable_address(&net, default_port, strict_port) {
                         continue;
                     }
-                    let new_addr = SocketAddr::new(canonical, port);
-                    if !in_flight.insert(new_addr) {
-                        continue;
+                    match store.insert_stub_if_missing(&net, now) {
+                        Ok(true) => new_stubs += 1,
+                        Ok(false) => {}
+                        Err(err) => warn!("crawler: failed to insert stub for {canonical}:{port}: {err}"),
                     }
-                    if let Err(err) = store.record_attempt(&net, now_ms()) {
-                        warn!("crawler: failed to record discovery attempt for {new_addr}: {err}");
-                    }
-                    if tx.try_send(new_addr).is_err() {
-                        in_flight.remove(&new_addr);
-                        break;
-                    }
-                    enqueued += 1;
                 }
                 if discovered > 0 {
-                    debug!("crawler: {addr} advertised {discovered} address(es), enqueued {enqueued} new");
+                    debug!("crawler: {addr} advertised {discovered} address(es), {new_stubs} new");
                 }
             }
             Err(err) => {
                 debug!("crawler: probe {addr} failed: {err}");
-                if let Err(err) = bump_attempt(store, addr) {
-                    warn!("crawler: failed to bump last_attempt for {addr}: {err}");
-                }
+                // `last_attempt` was already bumped by enqueue_probes before dispatch.
             }
         }
     }
+}
+
+/// Determine whether `rec` is currently eligible for a probe.
+///
+/// A record is eligible iff:
+/// - It is not past the dead cutoff (matches `prune_dead`'s criterion).
+/// - If it has ever succeeded, `last_attempt` is at least `stale_good_ms` old.
+/// - If it has never succeeded, `last_attempt` is at least `stale_bad_ms` old.
+pub(crate) fn is_eligible(
+    rec: &PeerRecord,
+    now_ms: i64,
+    stale_good_ms: i64,
+    stale_bad_ms: i64,
+    dead_cutoff_ms: i64,
+) -> bool {
+    if rec.last_seen_ms < dead_cutoff_ms && rec.first_seen_ms < dead_cutoff_ms {
+        return false;
+    }
+    let since_attempt = now_ms.saturating_sub(rec.last_attempt_ms);
+    let threshold = if rec.last_success_ms > 0 { stale_good_ms } else { stale_bad_ms };
+    since_attempt >= threshold
 }
 
 fn apply_success(store: &PeerStore, addr: SocketAddr, result: &ProbeResult) -> Result<(), simply_kaspa_dnsseeder_store::Error> {

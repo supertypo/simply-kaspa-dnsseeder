@@ -52,7 +52,9 @@ async fn run(cli: CliArgs) -> Result<()> {
     let scheduler_cfg = SchedulerConfig {
         network_id,
         threads: cli.threads,
-        crawl_interval: cli.crawl_interval,
+        probe_tick: cli.probe_tick,
+        stale_good: cli.stale_good,
+        stale_bad: cli.stale_bad,
         dead_after: cli.dead_after,
         seeders: cli.seeder.iter().cloned().collect(),
         strict_port: cli.strict_port,

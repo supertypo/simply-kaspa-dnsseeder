@@ -138,6 +138,39 @@ impl PeerStore {
         Ok(rec)
     }
 
+    /// Insert a stub record for `addr` if none exists. Used by the discovery
+    /// path: a peer told us about this address, but we haven't tried it yet,
+    /// so we only want to register it for future probing without touching
+    /// `last_attempt_ms`. Returns `true` if a new record was created.
+    pub fn insert_stub_if_missing(&self, addr: &NetAddress, now_ms: i64) -> Result<bool, Error> {
+        let key = encode_key(addr)?;
+        let txn = self.db.begin_write()?;
+        let inserted = {
+            let mut t = txn.open_table(PEERS)?;
+            if t.get(key.as_slice())?.is_some() {
+                false
+            } else {
+                let rec = PeerRecord {
+                    id: UNKNOWN_PEER_ID,
+                    protocol_version: 0,
+                    timestamp_ms: 0,
+                    address: *addr,
+                    user_agent: String::new(),
+                    subnetwork_id: None,
+                    first_seen_ms: now_ms,
+                    last_attempt_ms: 0,
+                    last_success_ms: 0,
+                    last_seen_ms: now_ms,
+                };
+                let bytes = encode_record(&rec)?;
+                t.insert(key.as_slice(), bytes.as_slice())?;
+                true
+            }
+        };
+        txn.commit()?;
+        Ok(inserted)
+    }
+
     /// Returns the number of stored records.
     pub fn len(&self) -> Result<u64, Error> {
         let txn = self.db.begin_read()?;

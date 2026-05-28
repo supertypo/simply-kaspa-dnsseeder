@@ -22,9 +22,18 @@ pub struct CliArgs {
     #[clap(long, default_value = "10s", value_parser = humantime::parse_duration)]
     pub probe_timeout: Duration,
 
-    /// Interval after which a peer is re-probed.
+    /// Interval between probe scheduling ticks. Each tick selects a random
+    /// batch of up to `threads * 10` eligible peers and dispatches probes.
+    #[clap(long, default_value = "10s", value_parser = humantime::parse_duration)]
+    pub probe_tick: Duration,
+
+    /// Re-probe interval for peers that have succeeded at least once.
     #[clap(long, default_value = "15m", value_parser = humantime::parse_duration)]
-    pub crawl_interval: Duration,
+    pub stale_good: Duration,
+
+    /// Re-probe interval for peers that have never succeeded.
+    #[clap(long, default_value = "2h", value_parser = humantime::parse_duration)]
+    pub stale_bad: Duration,
 
     /// A peer is removed when `now - last_seen` exceeds this duration.
     #[clap(long, default_value = "7d", value_parser = humantime::parse_duration)]

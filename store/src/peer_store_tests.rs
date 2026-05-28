@@ -132,6 +132,34 @@ fn record_attempt_preserves_existing_success_fields() {
 }
 
 #[test]
+fn insert_stub_if_missing_creates_then_noops() {
+    let (_dir, store) = open_temp_store();
+    let addr = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)), port: 16111 };
+
+    assert!(store.insert_stub_if_missing(&addr, 100).unwrap());
+    let r1 = store.get(&addr).unwrap().expect("stub present");
+    assert_eq!(r1.id, UNKNOWN_PEER_ID);
+    assert_eq!(r1.first_seen_ms, 100);
+    assert_eq!(r1.last_seen_ms, 100);
+    assert_eq!(r1.last_attempt_ms, 0);
+    assert_eq!(r1.last_success_ms, 0);
+
+    assert!(!store.insert_stub_if_missing(&addr, 999).unwrap());
+    let r2 = store.get(&addr).unwrap().expect("stub still present");
+    assert_eq!(r2, r1, "existing record must be untouched");
+}
+
+#[test]
+fn insert_stub_if_missing_does_not_touch_existing_record() {
+    let (_dir, store) = open_temp_store();
+    let r = make_rec(1, Ipv4Addr::new(7, 7, 7, 7), 16111, 100);
+    store.upsert(&r).unwrap();
+    assert!(!store.insert_stub_if_missing(&r.address, 999).unwrap());
+    let got = store.get(&r.address).unwrap().unwrap();
+    assert_eq!(got, r);
+}
+
+#[test]
 fn collect_matching_applies_filter() {
     let (_dir, store) = open_temp_store();
     store.upsert(&make_rec(1, Ipv4Addr::new(1, 1, 1, 1), 16111, 100)).unwrap();

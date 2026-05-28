@@ -110,13 +110,11 @@ mod probe_one_fanout {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
     use async_trait::async_trait;
-    use dashmap::DashSet;
     use kaspa_p2p_lib::pb::VersionMessage;
     use kaspa_utils::networking::IpAddress;
     use tempfile::TempDir;
-    use tokio::sync::mpsc;
 
-    use simply_kaspa_dnsseeder_store::PeerStore;
+    use simply_kaspa_dnsseeder_store::{NetAddress, PeerStore};
 
     use crate::error::ProbeError;
     use crate::model::ProbeResult;
@@ -164,16 +162,12 @@ mod probe_one_fanout {
         (dir, store)
     }
 
-    fn drain(rx: &mut mpsc::Receiver<SocketAddr>) -> Vec<SocketAddr> {
-        let mut out = Vec::new();
-        while let Ok(addr) = rx.try_recv() {
-            out.push(addr);
-        }
-        out
+    fn net(ip: IpAddr, port: u16) -> NetAddress {
+        NetAddress { ip, port }
     }
 
     #[tokio::test]
-    async fn enqueues_routable_advertised_addresses() {
+    async fn inserts_stubs_for_routable_advertised_addresses() {
         let probe = FanoutProbe {
             addresses: vec![
                 (ip4(8, 8, 8, 8), 16111),
@@ -181,32 +175,24 @@ mod probe_one_fanout {
             ],
         };
         let (_d, store) = open_store();
-        let (tx, mut rx) = mpsc::channel(16);
-        let in_flight = DashSet::new();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
-        in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
 
-        let enqueued = drain(&mut rx);
-        assert_eq!(enqueued.len(), 2);
-        assert!(enqueued.contains(&"8.8.8.8:16111".parse().unwrap()));
-        assert!(enqueued.contains(&"1.1.1.1:16222".parse().unwrap()));
+        // Source got upserted as a full record (probe succeeded), plus two stubs.
+        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().is_some());
+        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), 16222)).unwrap().is_some());
     }
 
     #[tokio::test]
     async fn falls_back_to_default_port_when_zero() {
         let probe = FanoutProbe { addresses: vec![(ip4(8, 8, 4, 4), 0)] };
         let (_d, store) = open_store();
-        let (tx, mut rx) = mpsc::channel(16);
-        let in_flight = DashSet::new();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
-        in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
 
-        let enqueued = drain(&mut rx);
-        assert_eq!(enqueued, vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4)), DEFAULT_PORT)]);
+        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4)), DEFAULT_PORT)).unwrap().is_some());
     }
 
     #[tokio::test]
@@ -222,19 +208,19 @@ mod probe_one_fanout {
             ],
         };
         let (_d, store) = open_store();
-        let (tx, mut rx) = mpsc::channel(16);
-        let in_flight = DashSet::new();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
-        in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
 
-        let enqueued = drain(&mut rx);
-        assert_eq!(enqueued, vec!["8.8.8.8:16111".parse().unwrap()]);
+        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 16111)).unwrap().is_none());
+        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::LOCALHOST), 16111)).unwrap().is_none());
+        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(169, 254, 1, 1)), 16111)).unwrap().is_none());
+        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)), 16111)).unwrap().is_none());
+        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().is_some());
     }
 
     #[tokio::test]
-    async fn duplicates_within_one_result_are_only_enqueued_once() {
+    async fn duplicates_within_one_result_only_insert_once() {
         let probe = FanoutProbe {
             addresses: vec![
                 (ip4(8, 8, 8, 8), 16111),
@@ -243,78 +229,107 @@ mod probe_one_fanout {
             ],
         };
         let (_d, store) = open_store();
-        let (tx, mut rx) = mpsc::channel(16);
-        let in_flight = DashSet::new();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
-        in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
 
-        let enqueued = drain(&mut rx);
-        assert_eq!(enqueued, vec!["8.8.8.8:16111".parse().unwrap()]);
+        let rec = store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().unwrap();
+        // Stub: last_attempt should be 0 (we haven't probed it yet — discovery only).
+        assert_eq!(rec.last_attempt_ms, 0);
+        assert_eq!(rec.last_success_ms, 0);
     }
 
     #[tokio::test]
-    async fn already_in_flight_addresses_are_not_re_enqueued() {
-        let probe = FanoutProbe {
-            addresses: vec![(ip4(8, 8, 8, 8), 16111), (ip4(1, 1, 1, 1), 16111)],
-        };
+    async fn discovery_does_not_overwrite_existing_record() {
+        let probe = FanoutProbe { addresses: vec![(ip4(8, 8, 8, 8), 16111)] };
         let (_d, store) = open_store();
-        let (tx, mut rx) = mpsc::channel(16);
-        let in_flight = DashSet::new();
+        // Pre-existing record with a recent attempt+success — discovery must not touch it.
+        let addr = net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111);
+        store.record_attempt(&addr, 500).unwrap();
+        let pre = store.get(&addr).unwrap().unwrap();
+
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
-        in_flight.insert(source);
-        // Pretend 8.8.8.8 is already being crawled.
-        in_flight.insert("8.8.8.8:16111".parse().unwrap());
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
-
-        let enqueued = drain(&mut rx);
-        assert_eq!(enqueued, vec!["1.1.1.1:16111".parse().unwrap()]);
-    }
-
-    #[tokio::test]
-    async fn tx_full_rolls_back_in_flight_insert() {
-        let probe = FanoutProbe {
-            addresses: vec![
-                (ip4(8, 8, 8, 8), 16111),  // fills the 1-slot tx
-                (ip4(1, 1, 1, 1), 16111),  // tx full → rollback in_flight, break
-                (ip4(2, 2, 2, 2), 16111),  // never reached
-            ],
-        };
-        let (_d, store) = open_store();
-        let (tx, mut rx) = mpsc::channel(1); // capacity 1
-        let in_flight = DashSet::new();
-        let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
-        in_flight.insert(source);
-
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
-
-        // Only the first one made it into tx; the second was rolled back.
-        let first = rx.try_recv().unwrap();
-        assert_eq!(first, "8.8.8.8:16111".parse::<SocketAddr>().unwrap());
-
-        assert!(in_flight.contains(&"8.8.8.8:16111".parse::<SocketAddr>().unwrap()));
-        assert!(
-            !in_flight.contains(&"1.1.1.1:16111".parse::<SocketAddr>().unwrap()),
-            "rollback should remove the address that failed to enqueue",
-        );
-        assert!(!in_flight.contains(&"2.2.2.2:16111".parse::<SocketAddr>().unwrap()));
+        let post = store.get(&addr).unwrap().unwrap();
+        assert_eq!(pre, post, "discovery must not touch an existing record");
     }
 
     #[tokio::test]
     async fn canonicalizes_ipv4_mapped_ipv6() {
-        // ::ffff:8.8.8.8 should be enqueued as plain IPv4.
         let probe = FanoutProbe { addresses: vec![(ip6("::ffff:8.8.8.8"), 16111)] };
         let (_d, store) = open_store();
-        let (tx, mut rx) = mpsc::channel(16);
-        let in_flight = DashSet::new();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
-        in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
 
-        let enqueued = drain(&mut rx);
-        assert_eq!(enqueued, vec!["8.8.8.8:16111".parse::<SocketAddr>().unwrap()]);
+        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().is_some());
+    }
+}
+
+mod is_eligible {
+    use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord};
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use crate::scheduler::is_eligible;
+
+    fn rec(last_attempt: i64, last_success: i64, first_seen: i64, last_seen: i64) -> PeerRecord {
+        PeerRecord {
+            id: [0u8; 16],
+            protocol_version: 0,
+            timestamp_ms: 0,
+            address: NetAddress { ip: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), port: 16111 },
+            user_agent: String::new(),
+            subnetwork_id: None,
+            first_seen_ms: first_seen,
+            last_attempt_ms: last_attempt,
+            last_success_ms: last_success,
+            last_seen_ms: last_seen,
+        }
+    }
+
+    const NOW: i64 = 10_000_000;
+    const GOOD: i64 = 900_000; // 15m
+    const BAD: i64 = 7_200_000; // 2h
+    const DEAD_CUTOFF: i64 = 0;
+
+    #[test]
+    fn good_recent_not_eligible() {
+        let r = rec(NOW - 100_000, NOW - 200_000, NOW - 1_000_000, NOW - 100_000);
+        assert!(!is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn good_stale_eligible() {
+        let r = rec(NOW - GOOD - 1, NOW - 2_000_000, NOW - 10_000_000, NOW - GOOD - 1);
+        assert!(is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn bad_recent_not_eligible() {
+        // never succeeded; last attempt 30min ago — under stale_bad threshold
+        let r = rec(NOW - 1_800_000, 0, NOW - 2_000_000, 0);
+        assert!(!is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn bad_stale_eligible() {
+        // never succeeded; last attempt 3h ago — past stale_bad
+        let r = rec(NOW - BAD - 1, 0, NOW - BAD - 1, 0);
+        assert!(is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn never_attempted_stub_eligible() {
+        // brand-new stub: last_attempt=0, last_success=0; bad threshold applies
+        let r = rec(0, 0, NOW - 60_000, NOW - 60_000);
+        assert!(is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn past_dead_cutoff_not_eligible() {
+        // Both first_seen and last_seen below cutoff → considered dead, skip.
+        let r = rec(NOW - BAD - 1, 0, 100, 100);
+        assert!(!is_eligible(&r, NOW, GOOD, BAD, 1_000));
     }
 }
