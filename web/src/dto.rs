@@ -1,14 +1,8 @@
 //! JSON projections of [`simply_kaspa_dnsseeder_store::PeerRecord`].
 //!
-//! Two shapes are exposed via an `#[serde(untagged)]` enum so each
-//! authentication state serializes as a plain object with exactly the fields
-//! that view contains:
-//!
-//! - [`FullPeerDto`]: authenticated callers (or when no `--api-key` is set).
-//! - [`PublicPeerDto`]: anonymous callers when an API key is configured.
-//!
-//! Fields that may legitimately be "not yet known" are serialized as JSON
-//! `null` rather than sentinel values (`0`, `""`, `"0000…"`).
+//! Untagged enum: [`FullPeerDto`] for authenticated callers (or unconfigured
+//! API key), [`PublicPeerDto`] otherwise. Unknown fields serialize as `null`
+//! rather than sentinel values.
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;

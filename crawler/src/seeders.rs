@@ -25,9 +25,8 @@ impl Resolver for TokioResolver {
     }
 }
 
-/// Resolve every seeder in `Params::dns_seeders` in parallel, port-tagged with
-/// `NetworkId::default_p2p_port`. Failures from individual seeders are logged
-/// but never abort the bootstrap.
+/// Resolve all configured DNS seeders in parallel. Per-seeder failures are
+/// logged but don't abort bootstrap.
 pub async fn dns_seed_many<R: Resolver + ?Sized + 'static>(network_id: NetworkId, resolver: std::sync::Arc<R>) -> Vec<SocketAddr> {
     let params: Params = network_id.into();
     let port = network_id.default_p2p_port();

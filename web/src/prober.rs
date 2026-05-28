@@ -1,5 +1,4 @@
-//! Abstraction over the crawler so the HTTP layer can be tested without
-//! standing up the whole p2p stack.
+//! Probe abstraction decoupling the HTTP layer from the p2p stack (for testing).
 
 use std::net::SocketAddr;
 

@@ -7,9 +7,8 @@ use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-/// Sweep stale buckets every N successful `check` calls. The sweep is
-/// O(buckets) but `DashMap` shards it across stripes so per-call impact stays
-/// small.
+/// Sweep stale buckets every N successful `check` calls. O(buckets) but
+/// sharded across DashMap stripes.
 const SWEEP_INTERVAL: u64 = 1024;
 
 #[derive(Debug)]

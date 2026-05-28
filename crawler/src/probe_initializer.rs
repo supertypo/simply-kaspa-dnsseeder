@@ -188,9 +188,9 @@ impl ConnectionInitializer for ProbeInitializer {
     }
 }
 
-/// Every payload type except the five we explicitly drive in `do_probe`.
-/// Subscribed as a single silent drain so the router does not close the
-/// connection when the peer pushes operational-state traffic.
+/// Every payload type *except* the five `do_probe` drives explicitly.
+/// Subscribed as a silent drain so the router doesn't close the connection on
+/// operational-state traffic.
 pub(crate) fn drain_payload_types() -> Vec<KaspadMessagePayloadType> {
     use KaspadMessagePayloadType as T;
     vec![

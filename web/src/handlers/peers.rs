@@ -19,15 +19,14 @@ use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
 
 use crate::util::{X_API_KEY, client_ip, expose_ip};
 
-/// Hard cap on `GET /peers` response size so a large store can't OOM a client
-/// or the process. The 1000 most-recently-successful peers is plenty for any
-/// UI use; clients that need more should use the DNS interface.
+/// Hard cap on `GET /peers` response size to prevent OOM. Clients needing
+/// bulk data should use the DNS interface.
 const MAX_LIST_RESPONSE: usize = 1000;
 
 #[derive(Debug, Deserialize, Default)]
 pub(crate) struct ListQuery {
-    /// When true, the protocol-version and user-agent filters are skipped but
-    /// freshness (stale-good window) and stub exclusion still apply.
+    /// Skip protocol-version and user-agent filters when true; freshness and
+    /// stub exclusion still apply.
     #[serde(default)]
     all: bool,
 }

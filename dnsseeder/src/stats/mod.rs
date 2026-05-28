@@ -1,10 +1,9 @@
 //! Periodic stats dump.
 //!
-//! Aggregates counters from the crawler / DNS / web subsystems, a one-pass
-//! summary of [`PeerStore`], and process metadata into a single formatted
-//! info-level log block printed on a configurable interval. Counters are
-//! persisted to the store after every dump so cumulative totals survive
-//! across restarts (worst case: last interval's increments are lost).
+//! Periodic stats dump: aggregates subsystem counters, a one-pass
+//! [`PeerStore`] summary, and process metadata. Counters persist to the store
+//! after every dump so totals survive restarts (worst case: last interval's
+//! increments are lost).
 
 mod format;
 mod render;

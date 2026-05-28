@@ -1,16 +1,10 @@
 //! Concurrent scheduler driving peer probes.
 //!
-//! Design:
-//! - The discovery loop in [`Scheduler::probe_one`] only writes to the store
-//!   (creates a stub via [`PeerStore::insert_stub_if_missing`]) when a probed
-//!   peer advertises new addresses. It does NOT enqueue probes.
-//! - A periodic ticker ([`SchedulerConfig::probe_tick`], default 10s) drives
-//!   [`Scheduler::enqueue_probes`], which scans the store for eligible peers,
-//!   picks a random batch of up to `threads * BATCH_PER_THREAD`, and spawns
-//!   probes bounded by a semaphore.
-//! - Two-tier reprobe cadence (mirroring the Go dnsseeder): peers that have
-//!   succeeded at least once are re-probed every `stale_good` (default 15m);
-//!   peers that never succeeded are re-probed every `stale_bad` (default 2h).
+//! Discovery (via [`Scheduler::probe_one`]) only writes stubs to the store; a
+//! periodic ticker drives [`Scheduler::enqueue_probes`], which fans out
+//! semaphore-bounded probes. Two-tier reprobe cadence mirrors the Go
+//! dnsseeder: `stale_good` (default 15m) for previously-successful peers,
+//! `stale_bad` (default 2h) otherwise.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -29,13 +23,10 @@ use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
 use crate::probe::Probe;
 use crate::seeders::{Resolver, dns_seed_many};
 
-/// Maximum probes dispatched per `probe_tick` per configured thread.
+/// Max probes dispatched per tick per thread.
 pub(crate) const BATCH_PER_THREAD: usize = 10;
-/// Upper bound on outstanding probe tasks (waiting + running), expressed as a
-/// multiple of `threads`. When the in-flight set is at or above
-/// `threads * MAX_IN_FLIGHT_PER_THREAD`, ticks dispatch nothing new so the
-/// backlog can drain instead of growing unboundedly when probes take longer
-/// than `probe_tick`.
+/// Max in-flight probes per thread; new ticks dispatch nothing when the
+/// backlog hits this so it drains instead of growing.
 pub(crate) const MAX_IN_FLIGHT_PER_THREAD: usize = 10;
 /// Pruning runs on this fixed cadence (matches Go dnsseeder).
 const PRUNE_INTERVAL: Duration = Duration::from_secs(60);

@@ -16,8 +16,8 @@ use simply_kaspa_dnsseeder_store::{Family, Filter, PeerStore};
 use crate::config::DnsConfig;
 use crate::metrics::DnsMetrics;
 
-// musl-libc treats empty AAAA as a hard failure and refuses A fallback;
-// `100::` is from the IETF discard prefix so it's harmless if dialed.
+// musl-libc treats an empty AAAA reply as a hard failure (no A fallback).
+// `100::` is the IETF discard prefix — harmless if dialed.
 const MUSL_AAAA_SENTINEL: std::net::Ipv6Addr = std::net::Ipv6Addr::new(0x100, 0, 0, 0, 0, 0, 0, 0);
 
 const SOA_REFRESH: i32 = 900;

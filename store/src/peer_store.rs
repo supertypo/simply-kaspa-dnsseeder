@@ -10,13 +10,7 @@ use std::sync::Arc;
 /// redb table: key = bincoded `NetAddress` (ip + port), value = bincoded `PeerRecord`.
 const PEERS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("peers_v2");
 
-/// Secondary index ordered by `last_attempt_ms` (ascending = oldest first).
-/// Multimap key = `last_attempt_ms` (redb's built-in `i64` `Key` impl already
-/// uses sign-bit-flipped big-endian, so range scans are in signed numeric
-/// order). Value = bincoded `NetAddress` bytes (the same key used in `PEERS`).
-///
-/// Rebuilt from `PEERS` on every `open()` so it always stays in lock-step with
-/// the primary table.
+/// Index by `last_attempt_ms` (oldest first); rebuilt from PEERS on every `open()`.
 const ATTEMPT_IDX: MultimapTableDefinition<i64, &[u8]> = MultimapTableDefinition::new("peers_by_attempt_v2");
 
 /// Generic key/value table used for small persisted blobs (e.g. metrics snapshots).
@@ -174,13 +168,10 @@ impl PeerStore {
         Ok(removed)
     }
 
-    /// Record an attempt at `addr` taken at `now_ms`. Creates a stub record
-    /// (`id` = [`UNKNOWN_PEER_ID`], `last_seen_ms` = 0) if none exists, else
-    /// only refreshes `last_attempt_ms` on the existing record.
-    ///
-    /// Uses `Durability::Eventual` because losing the most recent attempt
-    /// timestamp on a crash only causes the scheduler to re-probe slightly
-    /// sooner — far cheaper than fsync-per-probe.
+    /// Record an attempt at `addr` taken at `now_ms`. Creates a stub if none
+    /// exists; otherwise only refreshes `last_attempt_ms`. Uses
+    /// `Durability::Eventual` — losing the latest attempt on crash only
+    /// causes a slightly-early re-probe, far cheaper than fsync per probe.
     pub fn record_attempt(&self, addr: &NetAddress, now_ms: i64) -> Result<PeerRecord, Error> {
         let key = encode_key(addr)?;
         let mut txn = self.db.begin_write()?;
@@ -225,10 +216,8 @@ impl PeerStore {
         Ok(rec)
     }
 
-    /// Insert a stub record for `addr` if none exists. Used by the discovery
-    /// path: a peer told us about this address, but we haven't tried it yet,
-    /// so we only want to register it for future probing without touching
-    /// `last_attempt_ms`. Returns `true` if a new record was created.
+    /// Insert a stub for `addr` if none exists. Discovery-only path —
+    /// does not touch `last_attempt_ms`. Returns true when a new record is created.
     pub fn insert_stub_if_missing(&self, addr: &NetAddress, now_ms: i64) -> Result<bool, Error> {
         let key = encode_key(addr)?;
         let txn = self.db.begin_write()?;
@@ -297,12 +286,9 @@ impl PeerStore {
         Ok(out)
     }
 
-    /// Return up to `max` records that are due to be probed, in ascending
-    /// `last_attempt_ms` order (most-overdue first).
-    ///
-    /// Walks the [`ATTEMPT_IDX`] multimap with a bounded range — never the
-    /// full `PEERS` table. Records are still verified against
-    /// `is_eligible_for_probe` to apply the bad-class threshold and dead cutoff.
+    /// Return up to `max` records due for probe, oldest `last_attempt_ms` first.
+    /// Walks [`ATTEMPT_IDX`] over a bounded range and re-checks each candidate
+    /// against [`is_eligible_for_probe`] for the bad-class threshold and dead cutoff.
     pub fn due_for_probe(
         &self,
         now_ms: i64,

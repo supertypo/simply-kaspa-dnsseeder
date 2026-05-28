@@ -1,14 +1,8 @@
 //! HTTP/JSON façade for the seeder.
 //!
-//! Endpoints are intentionally tiny:
-//! - `GET /ping`        — liveness, returns `pong`.
-//! - `GET /health`      — readiness with a peer count.
-//! - `GET /peers`       — JSON array of [`PeerDto`], sorted by `last_success_ms` desc.
-//! - `GET /peers/{id}`  — single peer by hex id.
-//! - `POST /peers`      — body `ip:port`, probes the peer and stores it on success.
-//!
-//! IP addresses are only included in responses when no `--api-key` is
-//! configured, or when the request carries a matching `X-API-KEY` header.
+//! Routes: `/ping`, `/health`, `/peers` (list/get/post), `/metrics`.
+//! IP addresses are exposed only when no `--api-key` is set or a matching
+//! `X-API-KEY` header is present.
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc, clippy::missing_panics_doc)]
 

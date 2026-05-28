@@ -11,8 +11,8 @@ use crate::metrics_source::{MetricsSource, NullMetricsSource};
 use crate::prober::Prober;
 use simply_kaspa_dnsseeder_common::RateLimiter;
 
-/// Shared state passed to every handler. Cheap to clone — every field is
-/// either an `Arc` or copy-on-write itself.
+/// Shared handler state. Cheap to clone — every field is an `Arc` or
+/// otherwise copy-on-write.
 #[derive(Clone)]
 pub struct AppState {
     pub store: PeerStore,

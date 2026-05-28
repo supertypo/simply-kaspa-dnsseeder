@@ -11,10 +11,8 @@ pub struct NetAddress {
     pub port: u16,
 }
 
-/// A persisted peer record. Stored as bincode in redb, keyed by `id`.
-///
-/// All timestamps are unix milliseconds. `subnetwork_id` is the raw 20-byte
-/// kaspa subnetwork identifier when present.
+/// Persisted peer record keyed by `NetAddress`. Timestamps are unix ms;
+/// `subnetwork_id` is the raw 20-byte kaspa subnetwork identifier when set.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerRecord {
     // Network identity.
