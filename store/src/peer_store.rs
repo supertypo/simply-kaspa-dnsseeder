@@ -2,26 +2,22 @@ use crate::error::Error;
 use crate::filter::Filter;
 use crate::record::{NetAddress, PeerRecord};
 use log::{debug, warn};
-use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};
+use redb::{Database, Durability, MultimapTableDefinition, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
 
 /// redb table: key = bincoded `NetAddress` (ip + port), value = bincoded `PeerRecord`.
-///
-/// The `_v2` suffix distinguishes this from the prior id-keyed schema; opening an
-/// old database simply ignores the legacy `peers` table and starts fresh.
 const PEERS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("peers_v2");
 
 /// Secondary index ordered by `last_attempt_ms` (ascending = oldest first).
+/// Multimap key = `last_attempt_ms` (redb's built-in `i64` `Key` impl already
+/// uses sign-bit-flipped big-endian, so range scans are in signed numeric
+/// order). Value = bincoded `NetAddress` bytes (the same key used in `PEERS`).
 ///
-/// Key layout: `last_attempt_ms` encoded as big-endian `i64` with the sign
-/// bit flipped (so the byte order matches the signed numeric order), followed
-/// by the bincoded `NetAddress` to make the key unique. Value is empty.
-///
-/// Rebuilt from `PEERS` on every `open()` so it always stays consistent with
-/// the primary table, even after schema changes that purge records.
-const ATTEMPT_IDX: TableDefinition<&[u8], &[u8]> = TableDefinition::new("peers_by_attempt_v1");
+/// Rebuilt from `PEERS` on every `open()` so it always stays in lock-step with
+/// the primary table.
+const ATTEMPT_IDX: MultimapTableDefinition<i64, &[u8]> = MultimapTableDefinition::new("peers_by_attempt_v2");
 
 /// Generic key/value table used for small persisted blobs (e.g. metrics snapshots).
 const KV: TableDefinition<&str, &[u8]> = TableDefinition::new("kv_v1");
@@ -60,7 +56,7 @@ impl PeerStore {
         let txn = db.begin_write()?;
         {
             let _ = txn.open_table(PEERS)?;
-            let _ = txn.open_table(ATTEMPT_IDX)?;
+            let _ = txn.open_multimap_table(ATTEMPT_IDX)?;
             let _ = txn.open_table(KV)?;
         }
         txn.commit()?;
@@ -74,25 +70,21 @@ impl PeerStore {
         Ok(store)
     }
 
-    /// Wipe and rebuild [`ATTEMPT_IDX`] from [`PEERS`]. Called at startup so
+    /// Drop and repopulate [`ATTEMPT_IDX`] from [`PEERS`]. Called at startup so
     /// the index is always in lock-step with the primary table, even after
-    /// crashes or schema purges.
+    /// crashes or schema purges. Uses `delete_multimap_table` for an O(1)
+    /// drop instead of an entry-by-entry clear loop.
     fn rebuild_attempt_index(&self) -> Result<usize, Error> {
         let txn = self.db.begin_write()?;
+        let _ = txn.delete_multimap_table(ATTEMPT_IDX)?;
         let mut count = 0usize;
         {
-            let mut idx = txn.open_table(ATTEMPT_IDX)?;
-            // Clear any stale entries.
-            let keys: Vec<Vec<u8>> = idx.iter()?.filter_map(|e| e.ok().map(|(k, _)| k.value().to_vec())).collect();
-            for k in &keys {
-                idx.remove(k.as_slice())?;
-            }
+            let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
             let peers = txn.open_table(PEERS)?;
             for entry in peers.iter()? {
                 let (k, v) = entry?;
                 let Ok(rec) = decode_record(v.value()) else { continue };
-                let idx_key = attempt_index_key(rec.last_attempt_ms, k.value());
-                idx.insert(idx_key.as_slice(), [].as_slice())?;
+                idx.insert(rec.last_attempt_ms, k.value())?;
                 count += 1;
             }
         }
@@ -136,15 +128,15 @@ impl PeerStore {
         let txn = self.db.begin_write()?;
         {
             let mut t = txn.open_table(PEERS)?;
-            let mut idx = txn.open_table(ATTEMPT_IDX)?;
+            let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
             if let Some(old) = t.get(key.as_slice())?
                 && let Ok(old_rec) = decode_record(old.value())
                 && old_rec.last_attempt_ms != rec.last_attempt_ms
             {
-                idx.remove(attempt_index_key(old_rec.last_attempt_ms, &key).as_slice())?;
+                idx.remove(old_rec.last_attempt_ms, key.as_slice())?;
             }
             t.insert(key.as_slice(), bytes.as_slice())?;
-            idx.insert(attempt_index_key(rec.last_attempt_ms, &key).as_slice(), [].as_slice())?;
+            idx.insert(rec.last_attempt_ms, key.as_slice())?;
         }
         txn.commit()?;
         Ok(())
@@ -167,11 +159,11 @@ impl PeerStore {
         let txn = self.db.begin_write()?;
         let removed = {
             let mut t = txn.open_table(PEERS)?;
-            let mut idx = txn.open_table(ATTEMPT_IDX)?;
+            let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
             match t.remove(key.as_slice())? {
                 Some(v) => {
                     if let Ok(old_rec) = decode_record(v.value()) {
-                        idx.remove(attempt_index_key(old_rec.last_attempt_ms, &key).as_slice())?;
+                        idx.remove(old_rec.last_attempt_ms, key.as_slice())?;
                     }
                     true
                 }
@@ -185,12 +177,17 @@ impl PeerStore {
     /// Record an attempt at `addr` taken at `now_ms`. Creates a stub record
     /// (`id` = [`UNKNOWN_PEER_ID`], `last_seen_ms` = 0) if none exists, else
     /// only refreshes `last_attempt_ms` on the existing record.
+    ///
+    /// Uses `Durability::Eventual` because losing the most recent attempt
+    /// timestamp on a crash only causes the scheduler to re-probe slightly
+    /// sooner — far cheaper than fsync-per-probe.
     pub fn record_attempt(&self, addr: &NetAddress, now_ms: i64) -> Result<PeerRecord, Error> {
         let key = encode_key(addr)?;
-        let txn = self.db.begin_write()?;
+        let mut txn = self.db.begin_write()?;
+        txn.set_durability(Durability::Eventual);
         let rec = {
             let mut t = txn.open_table(PEERS)?;
-            let mut idx = txn.open_table(ATTEMPT_IDX)?;
+            let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
             let (mut rec, old_attempt) = match t.get(key.as_slice())? {
                 Some(v) => {
                     let r = decode_record(v.value())?;
@@ -219,9 +216,9 @@ impl PeerStore {
             if let Some(prev) = old_attempt
                 && prev != now_ms
             {
-                idx.remove(attempt_index_key(prev, &key).as_slice())?;
+                idx.remove(prev, key.as_slice())?;
             }
-            idx.insert(attempt_index_key(now_ms, &key).as_slice(), [].as_slice())?;
+            idx.insert(now_ms, key.as_slice())?;
             rec
         };
         txn.commit()?;
@@ -237,7 +234,7 @@ impl PeerStore {
         let txn = self.db.begin_write()?;
         let inserted = {
             let mut t = txn.open_table(PEERS)?;
-            let mut idx = txn.open_table(ATTEMPT_IDX)?;
+            let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
             if t.get(key.as_slice())?.is_some() {
                 false
             } else {
@@ -255,7 +252,7 @@ impl PeerStore {
                 };
                 let bytes = encode_record(&rec)?;
                 t.insert(key.as_slice(), bytes.as_slice())?;
-                idx.insert(attempt_index_key(0, &key).as_slice(), [].as_slice())?;
+                idx.insert(0_i64, key.as_slice())?;
                 true
             }
         };
@@ -300,30 +297,12 @@ impl PeerStore {
         Ok(out)
     }
 
-    /// Read all records as-is. Use a `Filter` if you only want a subset.
-    pub fn iter_all(&self) -> Result<Vec<PeerRecord>, Error> {
-        let mut out = Vec::new();
-        let txn = self.db.begin_read()?;
-        let t = txn.open_table(PEERS)?;
-        for entry in t.iter()? {
-            let (_, v) = entry?;
-            match decode_record(v.value()) {
-                Ok(rec) => out.push(rec),
-                Err(e) => warn!("store: skipping corrupt record: {e}"),
-            }
-        }
-        Ok(out)
-    }
-
     /// Return up to `max` records that are due to be probed, in ascending
     /// `last_attempt_ms` order (most-overdue first).
     ///
-    /// Walks the [`ATTEMPT_IDX`] secondary index — never the full `PEERS`
-    /// table — and stops as soon as an entry's attempt time is too recent
-    /// for **any** eligibility class (i.e. `now - last_attempt < stale_good_ms`,
-    /// which is the looser of the two thresholds). Records are still verified
-    /// against `is_eligible_for_probe` to handle the bad-class threshold and
-    /// the dead cutoff.
+    /// Walks the [`ATTEMPT_IDX`] multimap with a bounded range — never the
+    /// full `PEERS` table. Records are still verified against
+    /// `is_eligible_for_probe` to apply the bad-class threshold and dead cutoff.
     pub fn due_for_probe(
         &self,
         now_ms: i64,
@@ -339,44 +318,37 @@ impl PeerStore {
         let attempt_ceiling = now_ms.saturating_sub(stale_good_ms);
         let mut out: Vec<PeerRecord> = Vec::with_capacity(max);
         let txn = self.db.begin_read()?;
-        let idx = txn.open_table(ATTEMPT_IDX)?;
+        let idx = txn.open_multimap_table(ATTEMPT_IDX)?;
         let peers = txn.open_table(PEERS)?;
-        for entry in idx.iter()? {
-            let (key_bytes, _) = entry?;
-            let key = key_bytes.value();
-            if key.len() < 8 {
-                continue;
-            }
-            let attempt = decode_attempt(&key[..8]);
-            if attempt > attempt_ceiling {
-                break;
-            }
-            let addr_bytes = &key[8..];
-            let Some(v) = peers.get(addr_bytes)? else { continue };
-            let Ok(rec) = decode_record(v.value()) else { continue };
-            if !is_eligible_for_probe(&rec, now_ms, stale_good_ms, stale_bad_ms, dead_cutoff_ms) {
-                continue;
-            }
-            out.push(rec);
-            if out.len() >= max {
-                break;
+        'outer: for entry in idx.range(..=attempt_ceiling)? {
+            let (_attempt, values) = entry?;
+            for v in values {
+                let addr_bytes = v?;
+                let Some(rec_bytes) = peers.get(addr_bytes.value())? else { continue };
+                let Ok(rec) = decode_record(rec_bytes.value()) else { continue };
+                if !is_eligible_for_probe(&rec, now_ms, stale_good_ms, stale_bad_ms, dead_cutoff_ms) {
+                    continue;
+                }
+                out.push(rec);
+                if out.len() >= max {
+                    break 'outer;
+                }
             }
         }
         Ok(out)
     }
 
     /// Delete every record where both `last_seen_ms` and `first_seen_ms` are
-    /// older than `cutoff_ms`. This handles two cases uniformly:
-    ///   - peers we used to reach but haven't recently (`last_seen_ms` stale, and
-    ///     `first_seen_ms <= last_seen_ms` is therefore also stale).
-    ///   - peers we've been trying for a while but never successfully reached
-    ///     (`last_seen_ms == 0`, so they go as soon as `first_seen_ms < cutoff_ms`).
+    /// older than `cutoff_ms`. Runs scan + delete in a single write transaction
+    /// so a concurrent `record_attempt` cannot leave an orphan index entry.
     pub fn prune_dead(&self, cutoff_ms: i64) -> Result<usize, Error> {
         debug!("store: prune_dead scan (cutoff_ms={cutoff_ms})");
-        let mut to_delete: Vec<(Vec<u8>, i64)> = Vec::new();
+        let txn = self.db.begin_write()?;
+        let deleted;
         {
-            let txn = self.db.begin_read()?;
-            let t = txn.open_table(PEERS)?;
+            let mut t = txn.open_table(PEERS)?;
+            let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
+            let mut to_delete: Vec<(Vec<u8>, i64)> = Vec::new();
             for entry in t.iter()? {
                 let (k, v) = entry?;
                 if let Ok(rec) = decode_record(v.value())
@@ -386,22 +358,15 @@ impl PeerStore {
                     to_delete.push((k.value().to_vec(), rec.last_attempt_ms));
                 }
             }
-        }
-        if to_delete.is_empty() {
-            return Ok(0);
-        }
-        let txn = self.db.begin_write()?;
-        {
-            let mut t = txn.open_table(PEERS)?;
-            let mut idx = txn.open_table(ATTEMPT_IDX)?;
             for (k, attempt) in &to_delete {
                 t.remove(k.as_slice())?;
-                idx.remove(attempt_index_key(*attempt, k).as_slice())?;
+                idx.remove(*attempt, k.as_slice())?;
             }
+            deleted = to_delete.len();
         }
         txn.commit()?;
-        debug!("store: pruned {} dead peers", to_delete.len());
-        Ok(to_delete.len())
+        debug!("store: pruned {deleted} dead peers");
+        Ok(deleted)
     }
 
     /// Compute an aggregate summary of all stored peers in a single read pass.
@@ -471,28 +436,6 @@ fn decode_record(bytes: &[u8]) -> Result<PeerRecord, Error> {
 
 fn encode_key(addr: &NetAddress) -> Result<Vec<u8>, Error> {
     bincode::serde::encode_to_vec(addr, bincode::config::standard()).map_err(|e| Error::Encode(e.to_string()))
-}
-
-/// Build an `ATTEMPT_IDX` key: 8-byte big-endian `i64` (sign bit flipped so byte
-/// order matches signed numeric order) followed by the address key bytes.
-fn attempt_index_key(attempt_ms: i64, addr_key: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8 + addr_key.len());
-    out.extend_from_slice(&encode_attempt(attempt_ms));
-    out.extend_from_slice(addr_key);
-    out
-}
-
-fn encode_attempt(attempt_ms: i64) -> [u8; 8] {
-    // Flip the sign bit so `i64::MIN` sorts before `i64::MAX` in byte order.
-    let biased = attempt_ms.cast_unsigned() ^ 0x8000_0000_0000_0000;
-    biased.to_be_bytes()
-}
-
-fn decode_attempt(bytes: &[u8]) -> i64 {
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&bytes[..8]);
-    let biased = u64::from_be_bytes(buf);
-    (biased ^ 0x8000_0000_0000_0000).cast_signed()
 }
 
 /// Eligibility predicate used by [`PeerStore::due_for_probe`]. Kept in this
