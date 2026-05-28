@@ -185,9 +185,11 @@ impl PeerStore {
     /// Read all records, applying `filter` and collecting matches.
     pub fn collect_matching(&self, filter: &Filter) -> Result<Vec<PeerRecord>, Error> {
         let mut out = Vec::new();
+        let mut total = 0usize;
         let txn = self.db.begin_read()?;
         let t = txn.open_table(PEERS)?;
         for entry in t.iter()? {
+            total += 1;
             let (_, v) = entry?;
             match decode_record(v.value()) {
                 Ok(rec) => {
@@ -198,6 +200,7 @@ impl PeerStore {
                 Err(e) => warn!("store: skipping corrupt record: {e}"),
             }
         }
+        debug!("store: collect_matching family={:?} scanned={total} matched={}", filter.family, out.len());
         Ok(out)
     }
 
@@ -223,6 +226,7 @@ impl PeerStore {
     ///   - peers we've been trying for a while but never successfully reached
     ///     (`last_seen_ms == 0`, so they go as soon as `first_seen_ms < cutoff_ms`).
     pub fn prune_dead(&self, cutoff_ms: i64) -> Result<usize, Error> {
+        debug!("store: prune_dead scan (cutoff_ms={cutoff_ms})");
         let mut to_delete: Vec<Vec<u8>> = Vec::new();
         {
             let txn = self.db.begin_read()?;

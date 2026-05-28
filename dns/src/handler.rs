@@ -153,6 +153,7 @@ impl RequestHandler for SeederHandler {
         }
 
         let answers = self.build_answers(qtype);
+        debug!("dns: answered {qtype:?} for {qname} from {src} with {} record(s)", answers.len());
         let mut header = Header::response_from_request(request.header());
         header.set_authoritative(true);
         header.set_response_code(ResponseCode::NoError);

@@ -104,9 +104,10 @@ impl Scheduler {
                 }
                 _ = prune_ticker.tick() => {
                     let cutoff = now_ms().saturating_sub(self.config.dead_after_ms());
+                    debug!("crawler: prune tick (cutoff={cutoff}, dead_after={:?})", self.config.dead_after);
                     match self.store.prune_dead(cutoff) {
                         Ok(n) if n > 0 => info!("crawler: pruned {n} dead peer(s)"),
-                        Ok(_) => {}
+                        Ok(_) => debug!("crawler: prune tick removed 0 peers"),
                         Err(err) => warn!("crawler: prune failed: {err}"),
                     }
                 }
@@ -173,19 +174,21 @@ impl Scheduler {
         let default_port = self.config.network_id.default_p2p_port();
         let strict_port = self.config.strict_port;
 
-        let mut eligible: Vec<NetAddress> = self
-            .store
-            .iter_all()?
-            .into_iter()
-            .filter(|rec| {
-                is_eligible(rec, now, stale_good_ms, stale_bad_ms, dead_cutoff)
-                    && is_acceptable_address(&rec.address, default_port, strict_port)
-                    && !self.in_flight.contains(&SocketAddr::new(rec.address.ip, rec.address.port))
-            })
-            .map(|rec| rec.address)
-            .collect();
+        let mut eligible: Vec<NetAddress> = Vec::new();
+        let mut total = 0usize;
+        for rec in self.store.iter_all()? {
+            total += 1;
+            if is_eligible(&rec, now, stale_good_ms, stale_bad_ms, dead_cutoff)
+                && is_acceptable_address(&rec.address, default_port, strict_port)
+                && !self.in_flight.contains(&SocketAddr::new(rec.address.ip, rec.address.port))
+            {
+                eligible.push(rec.address);
+            }
+        }
 
+        let eligible_count = eligible.len();
         if eligible.is_empty() {
+            debug!("crawler: probe tick (scanned={total}, eligible=0, dispatched=0, in_flight={})", self.in_flight.len());
             return Ok(());
         }
 
@@ -219,7 +222,10 @@ impl Scheduler {
                 in_flight.remove(&addr);
             });
         }
-        debug!("crawler: dispatched {count} probe(s) this tick");
+        debug!(
+            "crawler: probe tick (scanned={total}, eligible={eligible_count}, dispatched={count}, in_flight={})",
+            self.in_flight.len()
+        );
         Ok(())
     }
 
@@ -234,6 +240,10 @@ impl Scheduler {
     ) {
         match probe.probe(addr).await {
             Ok(result) => {
+                debug!(
+                    "crawler: probe {addr} succeeded (protocol={}, ua={:?})",
+                    result.version.protocol_version, result.version.user_agent
+                );
                 if let Err(err) = apply_success(store, addr, &result) {
                     warn!("crawler: failed to persist successful probe of {addr}: {err}");
                 }

@@ -135,11 +135,12 @@ async fn submit_peer(
 
     match state.prober.probe(addr).await {
         Ok(rec) => {
+            debug!("web: POST /peers accepted {addr} (probe ok)");
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
             (StatusCode::OK, Json(PeerDto::from_record(&rec, expose, state.config.network_default_port))).into_response()
         }
         Err(err) => {
-            debug!("POST /peers probe of {addr} failed: {err}");
+            debug!("web: POST /peers probe of {addr} failed: {err}");
             (StatusCode::BAD_GATEWAY, format!("probe failed: {err}")).into_response()
         }
     }
