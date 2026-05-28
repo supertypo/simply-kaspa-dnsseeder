@@ -71,7 +71,6 @@ impl ProbeInitializer {
 
         let timeout = self.config.probe_timeout;
 
-        // 1. Peer pushes its Version unprompted on connect.
         let peer_version: VersionMessage = dequeue_with_timeout!(version_route, Payload::Version, timeout)?;
         debug!(
             "crawler: probe {}: peer version protocol={} ua={:?} network={}",
@@ -80,15 +79,14 @@ impl ProbeInitializer {
             peer_version.user_agent,
             peer_version.network,
         );
-        // Update the router's identity from the peer's reported UUID so the
-        // Hub keys connections by the real peer id instead of `Uuid::nil()`,
-        // eliminating spurious "duplicate key" evictions when the same IP is
-        // re-probed before the previous Hub entry expires.
+        // Adopt the peer's reported UUID so the Hub keys connections by the
+        // real peer id instead of `Uuid::nil()`, avoiding spurious duplicate-key
+        // evictions when the same IP is re-probed before the previous Hub entry
+        // expires.
         if let Ok(peer_id) = PeerId::from_slice(&peer_version.id) {
             router.set_identity(peer_id);
         }
 
-        // 2. Reply with a Version that mirrors the peer's protocol_version + services.
         let our_version = pb::VersionMessage {
             protocol_version: peer_version.protocol_version,
             services: peer_version.services,
@@ -102,25 +100,20 @@ impl ProbeInitializer {
         };
         router.enqueue(make_message!(Payload::Version, our_version)).await?;
 
-        // 3. Receive peer's Verack.
         let _verack: VerackMessage = dequeue_with_timeout!(verack_route, Payload::Verack, timeout)?;
-
-        // 4. Send our Verack.
         router.enqueue(make_message!(Payload::Verack, pb::VerackMessage {})).await?;
 
-        // 5. Ready exchange — kaspa-p2p-lib peers send Ready and wait for ours
-        // (8s peer-side timeout) before they will service any further messages.
+        // kaspa-p2p-lib peers send Ready and wait for ours (8s peer-side timeout)
+        // before they will service any further messages.
         router.enqueue(make_message!(Payload::Ready, ReadyMessage {})).await?;
         let _ready: ReadyMessage = dequeue_with_timeout!(ready_route, Payload::Ready, timeout)?;
 
-        // 6. Peer sends RequestAddresses; reply with an empty Addresses payload.
         let _peer_req: RequestAddressesMessage =
             dequeue_with_timeout!(request_addr_route, Payload::RequestAddresses, timeout)?;
         router
             .enqueue(make_message!(Payload::Addresses, pb::AddressesMessage { address_list: vec![] }))
             .await?;
 
-        // 7. Now ask the peer for its address book.
         router
             .enqueue(make_message!(
                 Payload::RequestAddresses,
@@ -128,7 +121,6 @@ impl ProbeInitializer {
             ))
             .await?;
 
-        // 8. Receive the peer's Addresses.
         let msg: AddressesMessage = dequeue_with_timeout!(addresses_route, Payload::Addresses, timeout)?;
         let address_list: Vec<(IpAddress, u16)> = msg.try_into()?;
         if address_list.len() > MAX_ADDRESSES_RECEIVE {
@@ -151,11 +143,10 @@ impl ConnectionInitializer for ProbeInitializer {
         let result = self.do_probe(&router).await;
         let sender = self.pending.remove(&addr).map(|(_, tx)| tx);
         // Do NOT close the router here: `initialize_connection` runs BEFORE
-        // the connection handler pushes `HubEvent::NewPeer`. Closing here
-        // would queue `PeerClosing` ahead of `NewPeer`, the Hub would no-op
-        // the closing (nothing to remove yet), then insert the router and
-        // never remove it. probe.rs terminates after `connect_peer` returns,
-        // which is after `NewPeer` is queued — that ordering is correct.
+        // the connection handler queues `HubEvent::NewPeer`, so a close at this
+        // point would push `PeerClosing` ahead of `NewPeer` and the Hub would
+        // leak the router. `probe.rs` terminates after `connect_peer` returns,
+        // which is after `NewPeer` is queued.
 
         match result {
             Ok(probe_result) => {

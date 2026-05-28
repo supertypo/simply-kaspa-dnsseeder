@@ -67,11 +67,10 @@ impl Probe for KaspadProbe {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let outcome = tokio::time::timeout(remaining, rx).await;
 
-        // Terminate the peer connection. `connect_peer` returned only after
-        // `HubEvent::NewPeer` was pushed to the Hub channel; `terminate` pushes
-        // `PeerClosing` (via the router's close()) which the Hub processes
-        // after `NewPeer`, so the router is correctly removed from `Hub.peers`.
-        // Bounded so a hung remote can't keep us inside this call indefinitely.
+        // `connect_peer` returns only after `HubEvent::NewPeer` is queued, so
+        // `terminate` here pushes `PeerClosing` after `NewPeer` and the router
+        // is correctly removed from `Hub.peers`. The outer timeout prevents a
+        // hung remote from stalling us indefinitely.
         let _ = tokio::time::timeout(TERMINATE_GRACE, self.adaptor.terminate(peer_key)).await;
 
         match outcome {

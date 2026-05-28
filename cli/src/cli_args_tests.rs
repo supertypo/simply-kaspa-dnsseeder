@@ -18,7 +18,7 @@ fn parses_required_network_id() {
 fn defaults_match_spec() {
     let cli = parse(&["--network-id", "kaspa-mainnet"]);
     assert_eq!(cli.threads, 8);
-    assert_eq!(cli.probe_timeout, Duration::from_secs(10));
+    assert_eq!(cli.probe_timeout, Duration::from_secs(8));
     assert_eq!(cli.probe_tick, Duration::from_secs(10));
     assert_eq!(cli.stale_good, Duration::from_secs(15 * 60));
     assert_eq!(cli.stale_bad, Duration::from_secs(2 * 60 * 60));

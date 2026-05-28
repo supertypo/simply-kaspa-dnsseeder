@@ -357,11 +357,11 @@ fn bump_attempt(store: &PeerStore, addr: SocketAddr) -> Result<(), simply_kaspa_
     store.record_attempt(&net, now_ms()).map(|_| ())
 }
 
-// Allow the web crate to issue ad-hoc submissions through the same code path.
 impl Scheduler {
-    /// Run a single probe synchronously (used by HTTP submissions). Errors
-    /// from the probe are returned to the caller; storage errors are logged
-    /// and surfaced as an `Err` too.
+    /// Run a single probe synchronously, used by the web crate to handle
+    /// HTTP submissions through the same code path as scheduled probes.
+    /// Probe errors are returned to the caller; storage errors are logged
+    /// and surfaced as an `Err` as well.
     pub async fn probe_and_store(
         probe: &dyn Probe,
         store: &PeerStore,
@@ -371,7 +371,6 @@ impl Scheduler {
             Ok(result) => apply_success(store, addr, &result)
                 .map_err(|e| crate::error::ProbeError::Connection(e.to_string())),
             Err(err) => {
-                // Best-effort bump of last_attempt for an existing entry; ignore failure.
                 let _ = bump_attempt(store, addr);
                 Err(err)
             }

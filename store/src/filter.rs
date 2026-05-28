@@ -29,7 +29,6 @@ impl Filter {
     /// Returns true iff the record passes all configured criteria.
     #[must_use]
     pub fn matches(&self, rec: &PeerRecord) -> bool {
-        // Dead
         if self.now_ms - rec.last_seen_ms > self.dead_after_ms {
             return false;
         }
