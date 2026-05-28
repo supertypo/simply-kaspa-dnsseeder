@@ -20,7 +20,7 @@ overflow-checks = true
 panic = "abort"
 
 [workspace.package]
-rust-version = "1.93.1"
+rust-version = "1.96.0"
 authors = ["simply-kaspa-dnsseeder contributors"]
 license = "MIT"
 edition = "2024"
