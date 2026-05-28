@@ -26,6 +26,31 @@ pub struct Filter {
 }
 
 impl Filter {
+    /// Build the standard "serve this peer to clients" filter shared by the
+    /// HTTP and DNS surfaces. Always enforces the stale-good window (which
+    /// also implicitly hides stubs) and skips the dead cutoff — `prune_dead`
+    /// removes those records out of band. Caller fills in `family` and
+    /// `default_port` per surface.
+    #[must_use]
+    pub fn serving(
+        now_ms: i64,
+        stale_good_ms: i64,
+        min_protocol_version: Option<u32>,
+        min_user_agent: Option<Version>,
+        family: Option<Family>,
+        default_port: Option<u16>,
+    ) -> Self {
+        Self {
+            now_ms,
+            dead_after_ms: i64::MAX,
+            stale_good_ms: Some(stale_good_ms),
+            family,
+            min_protocol_version,
+            min_user_agent,
+            default_port,
+        }
+    }
+
     /// Returns true iff the record passes all configured criteria.
     #[must_use]
     pub fn matches(&self, rec: &PeerRecord) -> bool {

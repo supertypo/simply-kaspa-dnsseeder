@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use kaspa_consensus_core::network::NetworkId;
 use log::{debug, info, warn};
+use simply_kaspa_dnsseeder_common::now_ms;
 use simply_kaspa_dnsseeder_crawler::CrawlerMetrics;
 use simply_kaspa_dnsseeder_dns::DnsMetrics;
 use simply_kaspa_dnsseeder_store::PeerStore;
@@ -104,11 +105,4 @@ pub async fn stats_loop(metrics: Arc<Metrics>, store: PeerStore, interval: Durat
             }
         }
     }
-}
-
-fn now_ms() -> i64 {
-    let dur = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO);
-    i64::try_from(dur.as_millis()).unwrap_or(i64::MAX)
 }

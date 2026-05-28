@@ -10,6 +10,7 @@ edition.workspace = true
 name = "simply_kaspa_dnsseeder_crawler"
 
 [dependencies]
+simply-kaspa-dnsseeder-common.workspace = true
 simply-kaspa-dnsseeder-store.workspace = true
 
 kaspa-p2p-lib.workspace = true

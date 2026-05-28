@@ -18,5 +18,5 @@ mod peer_store_tests;
 
 pub use error::Error;
 pub use filter::{Family, Filter};
-pub use peer_store::{PeerStore, StoreSummary, UNKNOWN_PEER_ID};
+pub use peer_store::{PeerStore, StoreSummary, UNKNOWN_PEER_ID, is_eligible_for_probe};
 pub use record::{NetAddress, PeerId, PeerRecord};

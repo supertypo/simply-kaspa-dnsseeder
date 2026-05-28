@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 simply-kaspa-dnsseeder-cli.workspace = true
+simply-kaspa-dnsseeder-common.workspace = true
 simply-kaspa-dnsseeder-store.workspace = true
 simply-kaspa-dnsseeder-crawler.workspace = true
 simply-kaspa-dnsseeder-dns.workspace = true

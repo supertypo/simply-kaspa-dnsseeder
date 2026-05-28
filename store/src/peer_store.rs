@@ -438,9 +438,11 @@ fn encode_key(addr: &NetAddress) -> Result<Vec<u8>, Error> {
     bincode::serde::encode_to_vec(addr, bincode::config::standard()).map_err(|e| Error::Encode(e.to_string()))
 }
 
-/// Eligibility predicate used by [`PeerStore::due_for_probe`]. Kept in this
-/// module so the index walker can re-check records pulled by primary key.
-fn is_eligible_for_probe(
+/// Eligibility predicate used by [`PeerStore::due_for_probe`]. Exposed for
+/// scheduler-side unit tests; production code reaches it through
+/// `due_for_probe` rather than calling it directly.
+#[must_use]
+pub fn is_eligible_for_probe(
     rec: &PeerRecord,
     now_ms: i64,
     stale_good_ms: i64,

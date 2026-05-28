@@ -2,24 +2,11 @@
 
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::http::{HeaderMap, HeaderName};
 
 pub(crate) const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 pub(crate) const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
-
-pub(crate) fn now_ms() -> i64 {
-    let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-    i64::try_from(dur.as_millis()).unwrap_or(i64::MAX)
-}
-
-pub(crate) fn canonicalize_ip(ip: IpAddr) -> IpAddr {
-    match ip {
-        IpAddr::V6(v6) => v6.to_canonical(),
-        IpAddr::V4(_) => ip,
-    }
-}
 
 /// True iff a request is allowed to see peer IPs: either no api key is
 /// configured, or the request carries the matching key.

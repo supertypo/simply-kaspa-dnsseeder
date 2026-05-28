@@ -9,7 +9,7 @@ use crate::config::WebConfig;
 use crate::metrics::WebMetrics;
 use crate::metrics_source::{MetricsSource, NullMetricsSource};
 use crate::prober::Prober;
-use crate::rate_limit::RateLimiter;
+use simply_kaspa_dnsseeder_common::RateLimiter;
 
 /// Shared state passed to every handler. Cheap to clone — every field is
 /// either an `Arc` or copy-on-write itself.
@@ -26,16 +26,16 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Default constructor: spins up fresh metrics and a null metrics source.
+    /// Use this from tests and any production path that doesn't aggregate
+    /// cross-subsystem metrics.
     #[must_use]
     pub fn new(store: PeerStore, prober: Arc<dyn Prober>, config: WebConfig) -> Self {
-        Self::with_metrics(store, prober, config, Arc::new(WebMetrics::new()))
+        Self::full(store, prober, config, Arc::new(WebMetrics::new()), Arc::new(NullMetricsSource))
     }
 
-    #[must_use]
-    pub fn with_metrics(store: PeerStore, prober: Arc<dyn Prober>, config: WebConfig, metrics: Arc<WebMetrics>) -> Self {
-        Self::full(store, prober, config, metrics, Arc::new(NullMetricsSource))
-    }
-
+    /// Full constructor for the binary, which already owns shared
+    /// [`WebMetrics`] and an aggregating [`MetricsSource`].
     #[must_use]
     pub fn full(
         store: PeerStore,

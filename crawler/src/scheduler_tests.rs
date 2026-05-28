@@ -292,13 +292,35 @@ mod probe_one_fanout {
 
         assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().is_some());
     }
+
+    struct FailingProbe;
+
+    #[async_trait]
+    impl Probe for FailingProbe {
+        async fn probe(&self, _addr: SocketAddr) -> Result<ProbeResult, ProbeError> {
+            Err(ProbeError::Connection("simulated failure".into()))
+        }
+    }
+
+    #[tokio::test]
+    async fn probe_and_store_failure_bumps_attempt() {
+        let (_d, store) = open_store();
+        let addr: SocketAddr = "8.8.8.8:16111".parse().unwrap();
+
+        let result = Scheduler::probe_and_store(&FailingProbe, &store, addr).await;
+        assert!(result.is_err());
+
+        // bump_attempt should have created (or touched) the record with
+        // last_attempt_ms > 0 and last_success_ms == 0.
+        let rec = store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().expect("attempt creates record");
+        assert!(rec.last_attempt_ms > 0, "bump_attempt should have set last_attempt_ms");
+        assert_eq!(rec.last_success_ms, 0, "failure must not record success");
+    }
 }
 
 mod is_eligible {
-    use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord};
+    use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, is_eligible_for_probe as is_eligible};
     use std::net::{IpAddr, Ipv4Addr};
-
-    use crate::scheduler::is_eligible;
 
     fn rec(last_attempt: i64, last_success: i64, first_seen: i64, last_seen: i64) -> PeerRecord {
         PeerRecord {

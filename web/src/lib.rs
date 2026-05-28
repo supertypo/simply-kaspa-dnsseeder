@@ -19,7 +19,6 @@ mod handlers;
 pub mod metrics;
 pub mod metrics_source;
 pub mod prober;
-pub mod rate_limit;
 pub mod router;
 pub mod server;
 pub mod state;

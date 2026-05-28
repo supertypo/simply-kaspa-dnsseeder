@@ -10,11 +10,11 @@ use hickory_server::authority::MessageResponseBuilder;
 use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
 use log::{debug, trace, warn};
 use rand::seq::SliceRandom;
+use simply_kaspa_dnsseeder_common::{RateLimiter, duration_to_ms, now_ms};
 use simply_kaspa_dnsseeder_store::{Family, Filter, PeerStore};
 
 use crate::config::DnsConfig;
 use crate::metrics::DnsMetrics;
-use crate::rate_limit::RateLimiter;
 
 // musl-libc treats empty AAAA as a hard failure and refuses A fallback;
 // `100::` is from the IETF discard prefix so it's harmless if dialed.
@@ -80,16 +80,14 @@ impl SeederHandler {
     }
 
     fn sample_address_records(&self, family: Family) -> Vec<Record> {
-        let stale_good_ms = i64::try_from(self.config.stale_good.as_millis()).unwrap_or(i64::MAX);
-        let filter = Filter {
-            now_ms: now_ms(),
-            dead_after_ms: i64::MAX,
-            stale_good_ms: Some(stale_good_ms),
-            family: Some(family),
-            min_protocol_version: self.config.min_protocol_version,
-            min_user_agent: self.config.min_user_agent.clone(),
-            default_port: Some(self.p2p_port),
-        };
+        let filter = Filter::serving(
+            now_ms(),
+            duration_to_ms(self.config.stale_good),
+            self.config.min_protocol_version,
+            self.config.min_user_agent.clone(),
+            Some(family),
+            Some(self.p2p_port),
+        );
         let peers = match self.store.collect_matching(&filter) {
             Ok(v) => v,
             Err(err) => {
@@ -254,9 +252,4 @@ fn fqdn(host: &str) -> Result<Name, hickory_proto::ProtoError> {
     let mut name = Name::from_str(trimmed)?;
     name.set_fqdn(true);
     Ok(name)
-}
-
-fn now_ms() -> i64 {
-    let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO);
-    i64::try_from(dur.as_millis()).unwrap_or(i64::MAX)
 }

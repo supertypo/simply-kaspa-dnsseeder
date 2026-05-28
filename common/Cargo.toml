@@ -1,0 +1,11 @@
+[package]
+name = "simply-kaspa-dnsseeder-common"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+dashmap.workspace = true

@@ -29,7 +29,7 @@ A "stub" record has `last_success_ms = 0` and `last_attempt_ms = 0`. The DNS fil
 `enqueue_probes` is bounded twice over: per-tick dispatch is capped at `threads * BATCH_PER_THREAD` (= `threads * 10`), and the total live backlog (waiting + running probe tasks) is capped at `threads * MAX_IN_FLIGHT_PER_THREAD` (also `threads * 10`). When the backlog hits the cap the tick logs `crawler: probe tick skipped` and dispatches nothing, letting the semaphore-bounded probes (`Semaphore::new(threads)`) drain. Without this cap, defaults of `probe_timeout >= probe_tick` would grow the backlog unboundedly.
 
 ### Two-tier eligibility (matches Go dnsseeder's `isGood`)
-`scheduler::is_eligible` decides what to re-probe:
+`store::is_eligible_for_probe` decides what to re-probe:
 - Past the dead cutoff (`dead_after`, default 24h since last contact): **never** — `prune_dead` will eventually delete it.
 - Succeeded at least once: re-probe every `stale_good` (default **15 min**).
 - Never succeeded (stub or repeated failures): re-probe every `stale_bad` (default **2 h**).

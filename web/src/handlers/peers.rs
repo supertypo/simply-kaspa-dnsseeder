@@ -15,7 +15,9 @@ use simply_kaspa_dnsseeder_store::{Filter, NetAddress};
 use crate::config::WebConfig;
 use crate::dto::PeerDto;
 use crate::state::AppState;
-use crate::util::{X_API_KEY, canonicalize_ip, client_ip, expose_ip, now_ms};
+use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
+
+use crate::util::{X_API_KEY, client_ip, expose_ip};
 
 /// Hard cap on `GET /peers` response size so a large store can't OOM a client
 /// or the process. The 1000 most-recently-successful peers is plenty for any
@@ -35,16 +37,14 @@ pub(crate) struct ListQuery {
 /// stubs have `last_success_ms = 0`). When `all` is false, also enforces the
 /// configured protocol-version and user-agent floors, matching the DNS path.
 fn list_filter(cfg: &WebConfig, all: bool) -> Filter {
-    let stale_good_ms = i64::try_from(cfg.stale_good.as_millis()).unwrap_or(i64::MAX);
-    Filter {
-        now_ms: now_ms(),
-        dead_after_ms: i64::MAX,
-        stale_good_ms: Some(stale_good_ms),
-        family: None,
-        min_protocol_version: if all { None } else { cfg.min_protocol_version },
-        min_user_agent: if all { None } else { cfg.min_user_agent.clone() },
-        default_port: None,
-    }
+    Filter::serving(
+        now_ms(),
+        duration_to_ms(cfg.stale_good),
+        if all { None } else { cfg.min_protocol_version },
+        if all { None } else { cfg.min_user_agent.clone() },
+        None,
+        None,
+    )
 }
 
 pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {

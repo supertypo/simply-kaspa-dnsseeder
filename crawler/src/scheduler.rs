@@ -24,7 +24,8 @@ use tokio::sync::{Semaphore, broadcast};
 
 use crate::error::Error;
 use crate::metrics::CrawlerMetrics;
-use crate::model::{ProbeResult, canonicalize_ip, is_acceptable_address, now_ms, peer_record_from_version};
+use crate::model::{ProbeResult, is_acceptable_address, peer_record_from_version};
+use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
 use crate::probe::Probe;
 use crate::seeders::{Resolver, dns_seed_many};
 
@@ -59,15 +60,15 @@ pub struct SchedulerConfig {
 
 impl SchedulerConfig {
     fn dead_after_ms(&self) -> i64 {
-        i64::try_from(self.dead_after.as_millis()).unwrap_or(i64::MAX)
+        duration_to_ms(self.dead_after)
     }
 
     fn stale_good_ms(&self) -> i64 {
-        i64::try_from(self.stale_good.as_millis()).unwrap_or(i64::MAX)
+        duration_to_ms(self.stale_good)
     }
 
     fn stale_bad_ms(&self) -> i64 {
-        i64::try_from(self.stale_bad.as_millis()).unwrap_or(i64::MAX)
+        duration_to_ms(self.stale_bad)
     }
 }
 
@@ -79,6 +80,28 @@ pub struct Scheduler {
     in_flight: Arc<DashSet<SocketAddr>>,
     semaphore: Arc<Semaphore>,
     metrics: Arc<CrawlerMetrics>,
+}
+
+/// Bundle of `Arc`s and clones a single probe task needs. Lets the dispatch
+/// loop hand off a single value to `tokio::spawn` instead of five.
+struct ProbeTaskCtx {
+    probe: Arc<dyn Probe>,
+    store: PeerStore,
+    in_flight: Arc<DashSet<SocketAddr>>,
+    semaphore: Arc<Semaphore>,
+    metrics: Arc<CrawlerMetrics>,
+}
+
+impl ProbeTaskCtx {
+    fn snapshot(s: &Scheduler) -> Self {
+        Self {
+            probe: s.probe.clone(),
+            store: s.store.clone(),
+            in_flight: s.in_flight.clone(),
+            semaphore: s.semaphore.clone(),
+            metrics: s.metrics.clone(),
+        }
+    }
 }
 
 impl Scheduler {
@@ -259,11 +282,7 @@ impl Scheduler {
             if let Err(err) = self.store.record_attempt(&net, now) {
                 warn!("crawler: failed to record attempt for {addr}: {err}");
             }
-            let probe = self.probe.clone();
-            let store = self.store.clone();
-            let in_flight = self.in_flight.clone();
-            let semaphore = self.semaphore.clone();
-            let metrics = self.metrics.clone();
+            let ctx = ProbeTaskCtx::snapshot(self);
             // Acquire the permit inside the task so the dispatch loop stays responsive to shutdown.
             tokio::spawn(async move {
                 // Drop guard ensures `in_flight` is freed and the gauge is decremented
@@ -283,6 +302,7 @@ impl Scheduler {
                         self.in_flight.remove(&self.addr);
                     }
                 }
+                let ProbeTaskCtx { probe, store, in_flight, semaphore, metrics } = ctx;
                 let mut guard = InFlightGuard { addr, in_flight, metrics: metrics.clone(), armed: false };
                 let Ok(_permit) = semaphore.acquire_owned().await else {
                     return;
@@ -351,25 +371,6 @@ impl Scheduler {
             }
         }
     }
-}
-
-/// Determine whether `rec` is currently eligible for a probe.
-///
-/// A record is eligible iff:
-/// - It is not past the dead cutoff (matches `prune_dead`'s criterion).
-/// - If it has ever succeeded, `last_attempt` is at least `stale_good_ms` old.
-/// - If it has never succeeded, `last_attempt` is at least `stale_bad_ms` old.
-///
-/// Mirrors the predicate used internally by [`PeerStore::due_for_probe`] —
-/// kept here for unit tests covering scheduler-side semantics.
-#[cfg(test)]
-pub(crate) fn is_eligible(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, stale_bad_ms: i64, dead_cutoff_ms: i64) -> bool {
-    if rec.last_seen_ms < dead_cutoff_ms && rec.first_seen_ms < dead_cutoff_ms {
-        return false;
-    }
-    let since_attempt = now_ms.saturating_sub(rec.last_attempt_ms);
-    let threshold = if rec.last_success_ms > 0 { stale_good_ms } else { stale_bad_ms };
-    since_attempt >= threshold
 }
 
 fn apply_success(

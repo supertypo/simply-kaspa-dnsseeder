@@ -10,6 +10,7 @@ edition.workspace = true
 name = "simply_kaspa_dnsseeder_store"
 
 [dependencies]
+simply-kaspa-dnsseeder-common.workspace = true
 redb.workspace = true
 bincode.workspace = true
 serde.workspace = true

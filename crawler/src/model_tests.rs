@@ -3,7 +3,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use kaspa_p2p_lib::pb::{SubnetworkId, VersionMessage};
 use simply_kaspa_dnsseeder_store::PeerRecord;
 
-use crate::model::{canonicalize_ip, peer_id_from_bytes, peer_record_from_version};
+use crate::model::{peer_id_from_bytes, peer_record_from_version};
+use simply_kaspa_dnsseeder_common::canonicalize_ip;
 
 fn version_with(id: Vec<u8>, ua: &str, _port_token: u32) -> VersionMessage {
     VersionMessage {

@@ -1,11 +1,15 @@
+//! Per-IP token-bucket rate limiter with lazy bucket eviction.
+//!
+//! `capacity == 0` disables the limiter (every call returns `true`).
+
+use dashmap::DashMap;
 use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use dashmap::DashMap;
-
-// Sweep stale buckets every N successful `check` calls. The sweep is O(buckets)
-// but DashMap shards it across stripes so the impact per call is small.
+/// Sweep stale buckets every N successful `check` calls. The sweep is
+/// O(buckets) but `DashMap` shards it across stripes so per-call impact stays
+/// small.
 const SWEEP_INTERVAL: u64 = 1024;
 
 #[derive(Debug)]
@@ -33,6 +37,8 @@ impl RateLimiter {
         }
     }
 
+    /// Returns `true` when the caller may proceed (and consumes one token).
+    /// When `capacity == 0` the limiter is disabled and always returns `true`.
     #[must_use]
     pub fn check(&self, ip: IpAddr) -> bool {
         if self.capacity == 0 {
@@ -63,20 +69,16 @@ impl RateLimiter {
         if !self.ops.fetch_add(1, Ordering::Relaxed).is_multiple_of(SWEEP_INTERVAL) {
             return;
         }
-        self.sweep(now);
-    }
-
-    fn sweep(&self, now: Instant) {
         self.buckets.retain(|_, b| now < b.refill_at);
     }
 
-    #[cfg(test)]
-    pub(crate) fn tracked_ips(&self) -> usize {
+    #[doc(hidden)]
+    pub fn tracked_ips(&self) -> usize {
         self.buckets.len()
     }
 
-    #[cfg(test)]
-    pub(crate) fn force_sweep(&self) {
-        self.sweep(Instant::now());
+    #[doc(hidden)]
+    pub fn force_sweep(&self) {
+        self.buckets.retain(|_, b| Instant::now() < b.refill_at);
     }
 }

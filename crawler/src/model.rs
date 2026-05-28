@@ -1,8 +1,8 @@
 //! Conversion from p2p `VersionMessage` + observed address-list to the storage record.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 
-use chrono::Utc;
+use simply_kaspa_dnsseeder_common::canonicalize_ip;
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerId, PeerRecord};
 
 use kaspa_p2p_lib::pb::VersionMessage;
@@ -55,22 +55,6 @@ pub fn peer_id_from_bytes(bytes: &[u8]) -> PeerId {
     let n = bytes.len().min(16);
     out[..n].copy_from_slice(&bytes[..n]);
     out
-}
-
-/// Collapse IPv4-mapped IPv6 (`::ffff:a.b.c.d`) to plain IPv4 so we never
-/// store both representations of the same host.
-#[must_use]
-pub fn canonicalize_ip(ip: IpAddr) -> IpAddr {
-    match ip {
-        IpAddr::V6(v6) => v6.to_canonical(),
-        IpAddr::V4(_) => ip,
-    }
-}
-
-/// Convenience: current UTC time in millis since the epoch.
-#[must_use]
-pub fn now_ms() -> i64 {
-    Utc::now().timestamp_millis()
 }
 
 /// Ephemeral port floor (IANA dynamic range; Linux default `ip_local_port_range` start).

@@ -11,13 +11,10 @@ pub mod config;
 pub mod error;
 pub mod handler;
 pub mod metrics;
-pub mod rate_limit;
 pub mod server;
 
 #[cfg(test)]
 mod handler_tests;
-#[cfg(test)]
-mod rate_limit_tests;
 
 pub use config::DnsConfig;
 pub use error::Error;

@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "cli",
+    "common",
     "store",
     "crawler",
     "dns",
@@ -27,6 +28,7 @@ edition = "2024"
 [workspace.dependencies]
 # Internal crates
 simply-kaspa-dnsseeder-cli = { path = "cli" }
+simply-kaspa-dnsseeder-common = { path = "common" }
 simply-kaspa-dnsseeder-store = { path = "store" }
 simply-kaspa-dnsseeder-crawler = { path = "crawler" }
 simply-kaspa-dnsseeder-dns = { path = "dns" }
