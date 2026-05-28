@@ -9,7 +9,7 @@ use kaspa_p2p_lib::pb::{
     self, AddressesMessage, ReadyMessage, RequestAddressesMessage, VerackMessage, VersionMessage, kaspad_message::Payload,
 };
 use kaspa_p2p_lib::{
-    ConnectionInitializer, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message,
+    ConnectionInitializer, IncomingRoute, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message,
 };
 use kaspa_utils::networking::{IpAddress, PeerId};
 use log::{debug, info, trace, warn};
@@ -65,7 +65,7 @@ impl ProbeInitializer {
         // relay traffic (InvRelayBlock, Ping, etc.). Without a subscriber the
         // router treats those as "no flow registered" and closes the socket
         // before our Addresses arrives — so we drain everything else.
-        let _drain_route = router.subscribe(drain_payload_types());
+        let drain_route = router.subscribe(drain_payload_types());
 
         router.start();
 
@@ -131,6 +131,20 @@ impl ProbeInitializer {
         }
         info!("crawler: probe {}: received {} address(es)", router.net_address(), address_list.len());
         trace!("crawler: probe {}: addresses = {:?}", router.net_address(), address_list);
+
+        // Keep all route receivers alive until the router shuts down. If they
+        // were dropped here, any further inbound message would hit a closed
+        // channel and the upstream router would log a misleading
+        // "P2P, route error: peer connection is closed" warning. The drain
+        // task exits naturally when `Adaptor::terminate` closes the senders.
+        spawn_route_drain(vec![
+            version_route,
+            verack_route,
+            ready_route,
+            request_addr_route,
+            addresses_route,
+            drain_route,
+        ]);
 
         Ok(ProbeResult { version: peer_version, addresses: address_list })
     }
@@ -221,5 +235,17 @@ pub(crate) fn drain_payload_types() -> Vec<KaspadMessagePayloadType> {
         T::SmtLaneChunk,
         T::RequestNextPruningPointSmtChunk,
     ]
+}
+
+/// Spawns a background task that owns the given route receivers and drains
+/// any messages until the router shuts down (sender side closes). Keeps the
+/// channels open so the router does not log "peer connection is closed" warns
+/// after a successful probe.
+fn spawn_route_drain(routes: Vec<IncomingRoute>) {
+    for mut route in routes {
+        tokio::spawn(async move {
+            while route.recv().await.is_some() {}
+        });
+    }
 }
 

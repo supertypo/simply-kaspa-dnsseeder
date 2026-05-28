@@ -94,7 +94,7 @@ pub struct CliArgs {
     pub rate_limit_window: Duration,
 
     /// `env_logger` filter (e.g. `info`, `debug`, `simply_kaspa_dnsseeder=trace,info`).
-    #[clap(long, default_value = "warn,kaspa_p2p_lib=error,simply_kaspa_dnsseeder=info")]
+    #[clap(long, default_value = "warn,simply_kaspa_dnsseeder=info")]
     pub log_level: String,
 
     /// Disable colored stdout output.
