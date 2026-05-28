@@ -36,8 +36,8 @@ fn public_view_exposes_only_anonymous_fields() {
         "userAgent",
         "kaspadVersion",
         "port",
-        "lastSeenMs",
-        "lastSeen",
+        "lastSuccessMs",
+        "lastSuccess",
     ]
     .into_iter()
     .collect();

@@ -28,8 +28,8 @@ pub struct PublicPeerDto {
     pub user_agent: Option<String>,
     pub kaspad_version: Option<String>,
     pub port: u16,
-    pub last_seen_ms: i64,
-    pub last_seen: String,
+    pub last_success_ms: Option<i64>,
+    pub last_success: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -86,8 +86,8 @@ impl PublicPeerDto {
             user_agent: opt_string(&rec.user_agent),
             kaspad_version: PeerRecord::parse_kaspad_version(&rec.user_agent).map(|v| v.to_string()),
             port: rec.address.port,
-            last_seen_ms: rec.last_seen_ms,
-            last_seen: format_iso(rec.last_seen_ms),
+            last_success_ms: opt_ms(rec.last_success_ms),
+            last_success: opt_ms(rec.last_success_ms).map(format_iso),
         }
     }
 }
