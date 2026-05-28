@@ -1,10 +1,10 @@
 //! Concurrent scheduler driving peer probes.
 //!
 //! Discovery (via [`Scheduler::probe_one`]) only writes stubs to the store; a
-//! periodic ticker drives [`Scheduler::enqueue_probes`], which fans out
-//! semaphore-bounded probes. Two-tier reprobe cadence mirrors the Go
-//! dnsseeder: `stale_good` (default 15m) for previously-successful peers,
-//! `stale_bad` (default 2h) otherwise.
+//! periodic ticker drives [`Scheduler::enqueue_probes`], which feeds a bounded
+//! channel consumed by a fixed pool of worker tasks. Two-tier reprobe cadence
+//! mirrors the Go dnsseeder: `stale_good` (default 15m) for previously-
+//! successful peers, `stale_bad` (default 2h) otherwise.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,7 +14,8 @@ use dashmap::DashSet;
 use kaspa_consensus_core::network::NetworkId;
 use log::{debug, info, warn};
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
-use tokio::sync::{Semaphore, broadcast};
+use tokio::sync::{broadcast, mpsc};
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
@@ -24,11 +25,9 @@ use crate::probe::Probe;
 use crate::seeders::{Resolver, dns_seed_many};
 use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
 
-/// Max probes dispatched per tick per thread.
-pub(crate) const BATCH_PER_THREAD: usize = 10;
-/// Max in-flight probes per thread; new ticks dispatch nothing when the
-/// backlog hits this so it drains instead of growing.
-pub(crate) const MAX_IN_FLIGHT_PER_THREAD: usize = 10;
+/// Probe queue depth per worker. Bounds how many ready peers can sit waiting
+/// for a worker before the ticker back-pressures via `try_send`.
+const CHANNEL_PER_THREAD: usize = 4;
 /// Pruning runs on this fixed cadence (matches Go dnsseeder).
 const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 /// Per-host timeout for `--seeder` lookups. Mirrors the built-in DNS-seeder
@@ -73,33 +72,8 @@ pub struct Scheduler {
     probe: Arc<dyn Probe>,
     resolver: Arc<dyn Resolver>,
     in_flight: Arc<DashSet<SocketAddr>>,
-    semaphore: Arc<Semaphore>,
     metrics: Arc<CrawlerMetrics>,
     cancel: CancellationToken,
-}
-
-/// Bundle of clones a single probe task needs so the dispatch loop can
-/// hand off one value to `tokio::spawn`.
-struct ProbeTaskCtx {
-    probe: Arc<dyn Probe>,
-    store: PeerStore,
-    in_flight: Arc<DashSet<SocketAddr>>,
-    semaphore: Arc<Semaphore>,
-    metrics: Arc<CrawlerMetrics>,
-    cancel: CancellationToken,
-}
-
-impl ProbeTaskCtx {
-    fn snapshot(s: &Scheduler) -> Self {
-        Self {
-            probe: s.probe.clone(),
-            store: s.store.clone(),
-            in_flight: s.in_flight.clone(),
-            semaphore: s.semaphore.clone(),
-            metrics: s.metrics.clone(),
-            cancel: s.cancel.clone(),
-        }
-    }
 }
 
 impl Scheduler {
@@ -111,14 +85,12 @@ impl Scheduler {
         resolver: Arc<dyn Resolver>,
         metrics: Arc<CrawlerMetrics>,
     ) -> Self {
-        let semaphore = Arc::new(Semaphore::new(config.threads.max(1)));
         Self {
             config,
             store,
             probe,
             resolver,
             in_flight: Arc::new(DashSet::new()),
-            semaphore,
             metrics,
             cancel: CancellationToken::new(),
         }
@@ -132,6 +104,23 @@ impl Scheduler {
     /// Run the scheduler. Returns when `shutdown` fires.
     pub async fn run(self, mut shutdown: broadcast::Receiver<()>) -> Result<(), Error> {
         self.bootstrap().await?;
+
+        let threads = self.config.threads.max(1);
+        let default_port = self.config.network_id.default_p2p_port();
+        let strict_port = self.config.strict_port;
+        let (tx, rx) = mpsc::channel::<NetAddress>(threads.saturating_mul(CHANNEL_PER_THREAD));
+
+        let dispatcher = tokio::spawn(run_dispatcher(
+            rx,
+            self.probe.clone(),
+            self.store.clone(),
+            self.in_flight.clone(),
+            self.metrics.clone(),
+            self.cancel.clone(),
+            threads,
+            default_port,
+            strict_port,
+        ));
 
         let mut probe_ticker = tokio::time::interval(self.config.probe_tick);
         probe_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -148,7 +137,7 @@ impl Scheduler {
                     break;
                 }
                 _ = probe_ticker.tick() => {
-                    if let Err(err) = self.enqueue_probes().await {
+                    if let Err(err) = self.enqueue_probes(&tx).await {
                         warn!("crawler: probe enqueue failed: {err}");
                     }
                 }
@@ -163,6 +152,8 @@ impl Scheduler {
                 }
             }
         }
+        drop(tx);
+        let _ = dispatcher.await;
         Ok(())
     }
 
@@ -214,15 +205,12 @@ impl Scheduler {
     }
 
     /// Pull the K most-overdue peers from the store's attempt-time index and
-    /// dispatch probes through the semaphore. Skips dispatch entirely when
-    /// the in-flight backlog has reached `threads * MAX_IN_FLIGHT_PER_THREAD`
-    /// so slow probes can drain.
-    async fn enqueue_probes(&self) -> Result<(), Error> {
-        let threads = self.config.threads.max(1);
-        let in_flight_cap = threads.saturating_mul(MAX_IN_FLIGHT_PER_THREAD);
-        let current_in_flight = self.in_flight.len();
-        if current_in_flight >= in_flight_cap {
-            debug!("crawler: probe tick skipped (in_flight={current_in_flight} >= cap={in_flight_cap})");
+    /// hand them to the worker pool via the bounded channel. Stops scanning as
+    /// soon as the channel back-pressures so slow workers can drain.
+    async fn enqueue_probes(&self, tx: &mpsc::Sender<NetAddress>) -> Result<(), Error> {
+        let capacity = tx.capacity();
+        if capacity == 0 {
+            debug!("crawler: probe tick skipped (channel full, in_flight={})", self.in_flight.len());
             return Ok(());
         }
 
@@ -233,52 +221,41 @@ impl Scheduler {
         let default_port = self.config.network_id.default_p2p_port();
         let strict_port = self.config.strict_port;
 
-        let headroom = in_flight_cap.saturating_sub(current_in_flight);
-        let batch_max = threads.saturating_mul(BATCH_PER_THREAD).min(headroom);
         // Overfetch to absorb records filtered by `in_flight` / `strict_port` /
         // private-IP guards without doing another index walk.
-        let fetch_target = batch_max.saturating_mul(2).max(batch_max);
+        let fetch_target = capacity.saturating_mul(2).max(capacity);
         let candidates = self
             .store
             .blocking(move |s| s.due_for_probe(now, stale_good_ms, stale_bad_ms, dead_cutoff, fetch_target))
             .await?;
         let scanned = candidates.len();
-        let mut selected: Vec<NetAddress> = Vec::with_capacity(batch_max);
+        let mut dispatched = 0usize;
         for rec in candidates {
-            if selected.len() >= batch_max {
-                break;
-            }
             if !is_acceptable_address(&rec.address, default_port, strict_port) {
                 continue;
             }
-            if self.in_flight.contains(&SocketAddr::new(rec.address.ip, rec.address.port)) {
-                continue;
-            }
-            selected.push(rec.address);
-        }
-
-        if selected.is_empty() {
-            debug!(
-                "crawler: probe tick (index_scanned={scanned}, dispatched=0, in_flight={})",
-                self.in_flight.len()
-            );
-            return Ok(());
-        }
-
-        let count = selected.len();
-        for net in selected {
-            let addr = SocketAddr::new(net.ip, net.port);
+            let addr = SocketAddr::new(rec.address.ip, rec.address.port);
             if !self.in_flight.insert(addr) {
                 continue;
             }
+            let net = rec.address;
             if let Err(err) = self.store.blocking(move |s| s.record_attempt(&net, now)).await {
                 warn!("crawler: failed to record attempt for {addr}: {err}");
             }
-            let ctx = ProbeTaskCtx::snapshot(self);
-            tokio::spawn(run_probe_task(ctx, addr, default_port, strict_port));
+            match tx.try_send(net) {
+                Ok(()) => dispatched += 1,
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    self.in_flight.remove(&addr);
+                    break;
+                }
+                Err(mpsc::error::TrySendError::Closed(_)) => {
+                    self.in_flight.remove(&addr);
+                    return Ok(());
+                }
+            }
         }
         debug!(
-            "crawler: probe tick (index_scanned={scanned}, dispatched={count}, in_flight={})",
+            "crawler: probe tick (index_scanned={scanned}, dispatched={dispatched}, in_flight={})",
             self.in_flight.len()
         );
         Ok(())
@@ -344,38 +321,63 @@ impl Scheduler {
     }
 }
 
-async fn run_probe_task(ctx: ProbeTaskCtx, addr: SocketAddr, default_port: u16, strict_port: bool) {
-    // Drop guard frees the in_flight slot and decrements the gauge even on panic.
-    struct InFlightGuard {
-        addr: SocketAddr,
-        in_flight: Arc<DashSet<SocketAddr>>,
-        metrics: Arc<CrawlerMetrics>,
-        armed: bool,
-    }
-    impl Drop for InFlightGuard {
-        fn drop(&mut self) {
-            if self.armed {
-                self.metrics.in_flight_dec();
+#[allow(clippy::too_many_arguments)]
+async fn run_dispatcher(
+    mut rx: mpsc::Receiver<NetAddress>,
+    probe: Arc<dyn Probe>,
+    store: PeerStore,
+    in_flight: Arc<DashSet<SocketAddr>>,
+    metrics: Arc<CrawlerMetrics>,
+    cancel: CancellationToken,
+    threads: usize,
+    default_port: u16,
+    strict_port: bool,
+) {
+    let mut workers: JoinSet<()> = JoinSet::new();
+    loop {
+        tokio::select! {
+            () = cancel.cancelled() => break,
+            Some(net) = rx.recv(), if workers.len() < threads => {
+                let addr = SocketAddr::new(net.ip, net.port);
+                let probe = probe.clone();
+                let store = store.clone();
+                let in_flight = in_flight.clone();
+                let metrics = metrics.clone();
+                let cancel = cancel.clone();
+                workers.spawn(async move {
+                    let _guard = InFlightGuard::new(addr, in_flight, metrics.clone());
+                    tokio::select! {
+                        () = Scheduler::probe_one(probe.as_ref(), &store, addr, default_port, strict_port, Some(&metrics)) => {}
+                        () = cancel.cancelled() => debug!("crawler: probe {addr} dropped on shutdown"),
+                    }
+                });
             }
-            self.in_flight.remove(&self.addr);
+            Some(_) = workers.join_next(), if !workers.is_empty() => {}
+            else => break,
         }
     }
-    let ProbeTaskCtx { probe, store, in_flight, semaphore, metrics, cancel } = ctx;
-    let mut guard = InFlightGuard { addr, in_flight, metrics: metrics.clone(), armed: false };
-    let _permit = tokio::select! {
-        permit = semaphore.acquire_owned() => match permit {
-            Ok(p) => p,
-            Err(_) => return,
-        },
-        () = cancel.cancelled() => return,
-    };
-    metrics.in_flight_inc();
-    guard.armed = true;
-    tokio::select! {
-        () = Scheduler::probe_one(probe.as_ref(), &store, addr, default_port, strict_port, Some(&metrics)) => {}
-        () = cancel.cancelled() => {
-            debug!("crawler: probe {addr} dropped on shutdown");
-        }
+    workers.abort_all();
+    while workers.join_next().await.is_some() {}
+}
+
+/// Frees the `in_flight` slot and decrements the gauge even on panic.
+struct InFlightGuard {
+    addr: SocketAddr,
+    in_flight: Arc<DashSet<SocketAddr>>,
+    metrics: Arc<CrawlerMetrics>,
+}
+
+impl InFlightGuard {
+    fn new(addr: SocketAddr, in_flight: Arc<DashSet<SocketAddr>>, metrics: Arc<CrawlerMetrics>) -> Self {
+        metrics.in_flight_inc();
+        Self { addr, in_flight, metrics }
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.metrics.in_flight_dec();
+        self.in_flight.remove(&self.addr);
     }
 }
 
