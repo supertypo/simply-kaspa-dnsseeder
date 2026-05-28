@@ -60,13 +60,14 @@ impl SeederHandler {
     }
 
     fn sample_address_records(&self, family: Family) -> Vec<Record> {
+        let stale_good_ms = i64::try_from(self.config.stale_good.as_millis()).unwrap_or(i64::MAX);
         let filter = Filter {
             now_ms: now_ms(),
             dead_after_ms: i64::MAX,
-            stale_good_ms: None,
+            stale_good_ms: Some(stale_good_ms),
             family: Some(family),
-            min_protocol_version: None,
-            min_user_agent: None,
+            min_protocol_version: self.config.min_protocol_version,
+            min_user_agent: self.config.min_user_agent.clone(),
             default_port: Some(self.p2p_port),
         };
         let peers = match self.store.collect_matching(&filter) {

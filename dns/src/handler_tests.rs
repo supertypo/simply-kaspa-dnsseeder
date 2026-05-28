@@ -21,6 +21,11 @@ const APEX: &str = "seeder.example.test";
 const APEX_FQDN: &str = "seeder.example.test.";
 const NS: &str = "ns.example.test";
 
+fn current_now_ms() -> i64 {
+    i64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis())
+        .expect("system clock fits in i64")
+}
+
 fn make_record(id: u8, ip: IpAddr, now_ms: i64) -> PeerRecord {
     let mut peer_id = [0u8; 16];
     peer_id[0] = id;
@@ -126,7 +131,7 @@ fn craft_query(name: &str, qtype: RecordType, class: DNSClass, id: u16, op: OpCo
 async fn answers_a_records_from_store() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let now = 1_700_000_000_000;
+    let now = current_now_ms();
     store.upsert(&make_record(1, IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), now)).unwrap();
     store.upsert(&make_record(2, IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8)), now)).unwrap();
 
@@ -144,7 +149,7 @@ async fn answers_a_records_from_store() {
 async fn aaaa_emits_musl_sentinel_when_no_ipv6_peers() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let now = 1_700_000_000_000;
+    let now = current_now_ms();
     store.upsert(&make_record(1, IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), now)).unwrap();
     let (server, _cfg, shutdown, handle) = start_server(store).await;
     let res = resolver(server);
@@ -170,10 +175,55 @@ async fn refuses_non_apex_queries() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ignores_peers_whose_last_success_is_too_old() {
+    let temp = TempDir::new().unwrap();
+    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
+    let now = current_now_ms();
+    // last_success 16 minutes ago — past the default 15m stale_good window.
+    let stale_ts = now - 16 * 60 * 1000;
+    let mut stale = make_record(1, IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), stale_ts);
+    // first_seen/last_seen recent enough to escape pruning, last_attempt recent too.
+    stale.first_seen_ms = now;
+    stale.last_seen_ms = now;
+    stale.last_attempt_ms = now;
+    stale.last_success_ms = stale_ts;
+    store.upsert(&stale).unwrap();
+
+    let (server, _cfg, shutdown, handle) = start_server(store).await;
+    let res = resolver(server);
+    let lookup = res.ipv4_lookup(APEX_FQDN).await;
+    if let Ok(l) = lookup {
+        assert_eq!(l.iter().count(), 0, "stale peer must not appear in DNS answers");
+    }
+    shutdown.send(()).unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ignores_stub_peers_without_success() {
+    let temp = TempDir::new().unwrap();
+    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
+    let now = current_now_ms();
+    // Stub: never succeeded.
+    let mut stub = make_record(2, IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), now);
+    stub.last_success_ms = 0;
+    store.upsert(&stub).unwrap();
+
+    let (server, _cfg, shutdown, handle) = start_server(store).await;
+    let res = resolver(server);
+    let lookup = res.ipv4_lookup(APEX_FQDN).await;
+    if let Ok(l) = lookup {
+        assert_eq!(l.iter().count(), 0, "stub peer must not appear in DNS answers");
+    }
+    shutdown.send(()).unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn ignores_peers_with_non_default_port() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let now = 1_700_000_000_000;
+    let now = current_now_ms();
     let mut bad = make_record(1, IpAddr::V4(Ipv4Addr::new(9, 9, 9, 9)), now);
     bad.address.port = 1234;
     store.upsert(&bad).unwrap();
@@ -191,7 +241,7 @@ async fn ignores_peers_with_non_default_port() {
 async fn refuses_any_query() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let now = 1_700_000_000_000;
+    let now = current_now_ms();
     for i in 0..10 {
         store.upsert(&make_record(i, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)), now)).unwrap();
     }
@@ -265,7 +315,7 @@ async fn response_is_capped_and_randomized() {
 
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let now = 1_700_000_000_000;
+    let now = current_now_ms();
     for i in 0..peer_count {
         store.upsert(&make_record(i, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)), now)).unwrap();
     }
@@ -300,7 +350,7 @@ async fn response_is_capped_and_randomized() {
 async fn rate_limit_drops_silently() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let now = 1_700_000_000_000;
+    let now = current_now_ms();
     store.upsert(&make_record(1, IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), now)).unwrap();
     let (server, _cfg, shutdown, handle) = start_server_with(
         |c| {
@@ -328,7 +378,7 @@ async fn response_fits_in_udp_mtu() {
     const UDP_MTU: usize = 512;
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let now = 1_700_000_000_000;
+    let now = current_now_ms();
     for i in 0..200u8 {
         store.upsert(&make_record(i, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)), now)).unwrap();
     }

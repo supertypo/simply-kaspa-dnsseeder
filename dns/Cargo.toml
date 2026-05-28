@@ -23,6 +23,7 @@ log.workspace = true
 thiserror.workspace = true
 rand.workspace = true
 dashmap.workspace = true
+semver.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

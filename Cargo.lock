@@ -3144,6 +3144,7 @@ dependencies = [
  "kaspa-consensus-core",
  "log",
  "rand 0.8.6",
+ "semver",
  "simply-kaspa-dnsseeder-store",
  "tempfile",
  "thiserror 2.0.18",

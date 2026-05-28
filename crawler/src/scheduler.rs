@@ -98,7 +98,7 @@ impl Scheduler {
                     break;
                 }
                 _ = probe_ticker.tick() => {
-                    if let Err(err) = self.enqueue_probes().await {
+                    if let Err(err) = self.enqueue_probes() {
                         warn!("crawler: probe enqueue failed: {err}");
                     }
                 }
@@ -165,7 +165,7 @@ impl Scheduler {
 
     /// Scan the store for eligible peers, randomly select up to
     /// `threads * BATCH_PER_THREAD`, and dispatch probes through the semaphore.
-    async fn enqueue_probes(&self) -> Result<(), Error> {
+    fn enqueue_probes(&self) -> Result<(), Error> {
         let now = now_ms();
         let dead_cutoff = now.saturating_sub(self.config.dead_after_ms());
         let stale_good_ms = self.config.stale_good_ms();
@@ -205,12 +205,16 @@ impl Scheduler {
             if let Err(err) = self.store.record_attempt(&net, now) {
                 warn!("crawler: failed to record attempt for {addr}: {err}");
             }
-            let Ok(permit) = self.semaphore.clone().acquire_owned().await else { break };
             let probe = self.probe.clone();
             let store = self.store.clone();
             let in_flight = self.in_flight.clone();
+            let semaphore = self.semaphore.clone();
+            // Acquire the permit inside the task so the dispatch loop stays responsive to shutdown.
             tokio::spawn(async move {
-                let _permit = permit;
+                let Ok(_permit) = semaphore.acquire_owned().await else {
+                    in_flight.remove(&addr);
+                    return;
+                };
                 Self::probe_one(probe.as_ref(), &store, addr, default_port, strict_port).await;
                 in_flight.remove(&addr);
             });
@@ -283,11 +287,12 @@ pub(crate) fn is_eligible(
     since_attempt >= threshold
 }
 
-fn apply_success(store: &PeerStore, addr: SocketAddr, result: &ProbeResult) -> Result<(), simply_kaspa_dnsseeder_store::Error> {
+fn apply_success(store: &PeerStore, addr: SocketAddr, result: &ProbeResult) -> Result<PeerRecord, simply_kaspa_dnsseeder_store::Error> {
     let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
     let existing = store.get(&net)?;
     let record = peer_record_from_version(addr, &result.version, now_ms(), existing.as_ref());
-    store.upsert(&record)
+    store.upsert(&record)?;
+    Ok(record)
 }
 
 fn bump_attempt(store: &PeerStore, addr: SocketAddr) -> Result<(), simply_kaspa_dnsseeder_store::Error> {
@@ -306,13 +311,8 @@ impl Scheduler {
         addr: SocketAddr,
     ) -> Result<PeerRecord, crate::error::ProbeError> {
         match probe.probe(addr).await {
-            Ok(result) => {
-                let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
-                let existing = store.get(&net).map_err(|e| crate::error::ProbeError::Connection(e.to_string()))?;
-                let record = peer_record_from_version(addr, &result.version, now_ms(), existing.as_ref());
-                store.upsert(&record).map_err(|e| crate::error::ProbeError::Connection(e.to_string()))?;
-                Ok(record)
-            }
+            Ok(result) => apply_success(store, addr, &result)
+                .map_err(|e| crate::error::ProbeError::Connection(e.to_string())),
             Err(err) => {
                 // Best-effort bump of last_attempt for an existing entry; ignore failure.
                 let _ = bump_attempt(store, addr);
