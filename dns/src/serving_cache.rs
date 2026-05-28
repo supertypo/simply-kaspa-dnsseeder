@@ -13,12 +13,12 @@ pub const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 pub const SNAPSHOT_MULTIPLIER: usize = 10;
 
 /// Pre-filtered set of currently-serving peer IPs, split by family. Each slice
-/// is bounded to `max_records * SNAPSHOT_MULTIPLIER` and ordered freshest-first
-/// at build time (random access from the DNS path doesn't rely on the order).
+/// is bounded to `max_records * SNAPSHOT_MULTIPLIER` and contains the most
+/// recently successful peers; the handler picks a random subset per query.
 #[derive(Default)]
 pub struct Snapshot {
-    pub v4: Box<[IpAddr]>,
-    pub v6: Box<[IpAddr]>,
+    pub(crate) v4: Box<[IpAddr]>,
+    pub(crate) v6: Box<[IpAddr]>,
 }
 
 pub struct ServingCache {
@@ -47,7 +47,7 @@ impl Default for ServingCache {
 }
 
 #[must_use]
-pub fn build_snapshot(store: &PeerStore, config: &DnsConfig, p2p_port: u16, cap: usize) -> Snapshot {
+pub(crate) fn build_snapshot(store: &PeerStore, config: &DnsConfig, p2p_port: u16, cap: usize) -> Snapshot {
     Snapshot {
         v4: pick_freshest(store, config, p2p_port, Family::V4, cap),
         v6: pick_freshest(store, config, p2p_port, Family::V6, cap),
@@ -76,14 +76,14 @@ fn pick_freshest(store: &PeerStore, config: &DnsConfig, p2p_port: u16, family: F
 }
 
 /// Synchronously rebuild and publish a snapshot. Cheap enough for startup and tests.
-pub fn refresh_now(cache: &ServingCache, store: &PeerStore, config: &DnsConfig, p2p_port: u16, cap: usize) {
+pub(crate) fn refresh_now(cache: &ServingCache, store: &PeerStore, config: &DnsConfig, p2p_port: u16, cap: usize) {
     let snap = build_snapshot(store, config, p2p_port, cap);
     debug!("dns: serving cache refreshed: v4={} v6={}", snap.v4.len(), snap.v6.len());
     cache.store(Arc::new(snap));
 }
 
 /// Periodically rebuild the snapshot off the async runtime until shutdown fires.
-pub fn spawn_refresher(
+pub(crate) fn spawn_refresher(
     cache: Arc<ServingCache>,
     store: PeerStore,
     config: Arc<DnsConfig>,
@@ -114,4 +114,85 @@ pub fn spawn_refresher(
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use kaspa_consensus_core::network::{NetworkId, NetworkType};
+    use simply_kaspa_dnsseeder_common::now_ms;
+    use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
+    use tempfile::TempDir;
+
+    use super::{SNAPSHOT_MULTIPLIER, build_snapshot};
+    use crate::config::DnsConfig;
+
+    fn rec(id: u8, ip: IpAddr, last_success_ms: i64, port: u16) -> PeerRecord {
+        let mut peer_id = [0u8; 16];
+        peer_id[0] = id;
+        PeerRecord {
+            id: peer_id,
+            protocol_version: 7,
+            timestamp_ms: last_success_ms,
+            address: NetAddress { ip, port },
+            user_agent: "/kaspad:1.0.0/".to_string(),
+            subnetwork_id: None,
+            first_seen_ms: last_success_ms,
+            last_attempt_ms: last_success_ms,
+            last_success_ms,
+            last_seen_ms: last_success_ms,
+        }
+    }
+
+    fn cfg() -> (DnsConfig, u16) {
+        let net = NetworkId::new(NetworkType::Mainnet);
+        let port = net.default_p2p_port();
+        let cfg = DnsConfig::new(net, vec!["127.0.0.1:0".parse().unwrap()], "seed.test.".into(), "ns.test.".into());
+        (cfg, port)
+    }
+
+    #[test]
+    fn empty_store_yields_empty_snapshot() {
+        let temp = TempDir::new().unwrap();
+        let store = PeerStore::open(temp.path().join("p.redb")).unwrap();
+        let (config, port) = cfg();
+        let snap = build_snapshot(&store, &config, port, 10 * SNAPSHOT_MULTIPLIER);
+        assert!(snap.v4.is_empty());
+        assert!(snap.v6.is_empty());
+    }
+
+    #[test]
+    fn splits_by_family_and_keeps_top_n_by_freshness() {
+        let temp = TempDir::new().unwrap();
+        let store = PeerStore::open(temp.path().join("p.redb")).unwrap();
+        let (config, port) = cfg();
+        let base = now_ms();
+        // Five v4 with strictly ordered (recent) success timestamps; cap of 3 keeps the freshest.
+        for (i, offset) in [5_000, 1_000, 4_000, 2_000, 3_000].into_iter().enumerate() {
+            #[allow(clippy::cast_possible_truncation)]
+            let id = i as u8 + 1;
+            store.upsert(&rec(id, IpAddr::V4(Ipv4Addr::new(10, 0, 0, id)), base - offset, port)).unwrap();
+        }
+        store.upsert(&rec(99, IpAddr::V6(Ipv6Addr::LOCALHOST), base - 1_000, port)).unwrap();
+
+        let snap = build_snapshot(&store, &config, port, 3);
+        assert_eq!(snap.v4.len(), 3);
+        assert_eq!(snap.v6.len(), 1);
+        // Smallest offsets (freshest) are 1_000, 2_000, 3_000 → ids 2, 4, 5.
+        let v4_ids: Vec<u8> = snap.v4.iter().filter_map(|ip| if let IpAddr::V4(v) = ip { Some(v.octets()[3]) } else { None }).collect();
+        assert_eq!(v4_ids, vec![2, 4, 5]);
+    }
+
+    #[test]
+    fn drops_peers_on_wrong_port() {
+        let temp = TempDir::new().unwrap();
+        let store = PeerStore::open(temp.path().join("p.redb")).unwrap();
+        let (config, port) = cfg();
+        let base = now_ms();
+        store.upsert(&rec(1, IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), base - 1_000, port)).unwrap();
+        store.upsert(&rec(2, IpAddr::V4(Ipv4Addr::new(2, 2, 2, 2)), base - 1_000, port + 1)).unwrap();
+        let snap = build_snapshot(&store, &config, port, 10);
+        assert_eq!(snap.v4.len(), 1);
+    }
 }

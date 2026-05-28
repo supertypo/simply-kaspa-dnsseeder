@@ -23,4 +23,4 @@ pub use error::Error;
 pub use handler::SeederHandler;
 pub use metrics::{DnsMetrics, DnsSnapshot};
 pub use server::{build_serving_cache, run_dns_server, run_dns_server_with_handler};
-pub use serving_cache::{REFRESH_INTERVAL, SNAPSHOT_MULTIPLIER, ServingCache, refresh_now, spawn_refresher};
+pub use serving_cache::{REFRESH_INTERVAL, SNAPSHOT_MULTIPLIER, ServingCache};
