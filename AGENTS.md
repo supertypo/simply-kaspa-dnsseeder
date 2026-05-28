@@ -72,7 +72,7 @@ Every log line starts with the *owning* subsystem (`crawler:`, `dns:`, `web:`, `
 - Never run `cargo clean` — the rusty-kaspa git deps are expensive to rebuild.
 - Comments: only when the *why* is non-obvious. The code is the *what*. No step-by-step narration, no task/PR references, no "added for X" history.
 - One responsibility per file. Split when a module starts mixing concerns (the `web::handlers/` and `dnsseeder::stats/` splits are the templates).
-- Persisted store keys (redb table names, blob keys in side tables) are **never** versioned in their name. If the on-disk shape changes incompatibly, handle it at read time — log a warning and reset/overwrite — instead of bumping a suffix. The next write replaces the bad blob.
+- Persisted store keys (redb table names, blob keys) are never versioned in their name. On an incompatible on-disk shape, warn and overwrite at read time; don't bump a `_v2` suffix.
 
 ## Keeping this document useful
 

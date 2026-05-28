@@ -1,7 +1,7 @@
 ##
 # builder image
 ##
-ARG RUST_VERSION
+ARG RUST_VERSION=invalid
 FROM rust:${RUST_VERSION}-alpine AS builder
 
 ARG REPO_DIR=.
@@ -10,7 +10,9 @@ RUN apk --no-cache add \
   musl-dev \
   g++ \
   linux-headers \
-  git
+  git \
+  protoc \
+  protobuf-dev
 
 WORKDIR /work
 

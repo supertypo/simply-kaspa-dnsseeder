@@ -13,7 +13,6 @@ use simply_kaspa_dnsseeder_web::MetricsSource;
 pub struct SubsystemMetrics {
     pub crawler: Arc<CrawlerMetrics>,
     pub dns: Arc<DnsMetrics>,
-    /// `None` when DNS serving is disabled (no zone configured).
     pub serving_cache: Option<Arc<ServingCache>>,
 }
 
