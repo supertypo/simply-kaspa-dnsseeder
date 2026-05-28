@@ -150,9 +150,12 @@ impl ConnectionInitializer for ProbeInitializer {
         let addr = router.net_address();
         let result = self.do_probe(&router).await;
         let sender = self.pending.remove(&addr).map(|(_, tx)| tx);
-        // Close the router promptly so post-handshake relay traffic does not keep
-        // arriving and the connection is torn down before we hand back control.
-        router.close().await;
+        // Do NOT close the router here: `initialize_connection` runs BEFORE
+        // the connection handler pushes `HubEvent::NewPeer`. Closing here
+        // would queue `PeerClosing` ahead of `NewPeer`, the Hub would no-op
+        // the closing (nothing to remove yet), then insert the router and
+        // never remove it. probe.rs terminates after `connect_peer` returns,
+        // which is after `NewPeer` is queued — that ordering is correct.
 
         match result {
             Ok(probe_result) => {

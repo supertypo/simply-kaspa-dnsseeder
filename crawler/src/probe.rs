@@ -16,11 +16,6 @@ use crate::probe_initializer::{PendingMap, ProbeInitializer, ProbeInitializerCon
 // Bound on the post-probe peer shutdown so a hung peer can't stall the caller.
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 
-// Hub event-loop poll: avoids a race where Adaptor::connect_peer returns before
-// HubEvent::NewPeer has been processed, which would make Hub::terminate a no-op.
-const TERMINATE_HUB_POLL_INTERVAL: Duration = Duration::from_millis(50);
-const TERMINATE_HUB_POLL_ATTEMPTS: u32 = 20;
-
 #[async_trait]
 pub trait Probe: Send + Sync {
     async fn probe(&self, addr: SocketAddr) -> Result<ProbeResult, ProbeError>;
@@ -72,17 +67,11 @@ impl Probe for KaspadProbe {
         let remaining = deadline.saturating_duration_since(Instant::now());
         let outcome = tokio::time::timeout(remaining, rx).await;
 
-        // Wait for the Hub event loop to register the peer before terminating;
-        // otherwise `Hub::terminate` finds nothing and the router leaks in `Hub.peers`.
-        for _ in 0..TERMINATE_HUB_POLL_ATTEMPTS {
-            if self.adaptor.has_peer(peer_key) {
-                break;
-            }
-            tokio::time::sleep(TERMINATE_HUB_POLL_INTERVAL).await;
-        }
-
-        // Always terminate the peer connection, even on timeout. Bounded so a
-        // hung remote can't keep us inside this call indefinitely.
+        // Terminate the peer connection. `connect_peer` returned only after
+        // `HubEvent::NewPeer` was pushed to the Hub channel; `terminate` pushes
+        // `PeerClosing` (via the router's close()) which the Hub processes
+        // after `NewPeer`, so the router is correctly removed from `Hub.peers`.
+        // Bounded so a hung remote can't keep us inside this call indefinitely.
         let _ = tokio::time::timeout(TERMINATE_GRACE, self.adaptor.terminate(peer_key)).await;
 
         match outcome {
