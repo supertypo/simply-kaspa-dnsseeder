@@ -51,21 +51,21 @@ async fn run(cli: CliArgs) -> Result<()> {
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     spawn_signal_handler(shutdown_tx.clone());
 
-    let metrics = Metrics::new(network_id, CliArgs::version(), cli.stale_good);
+    let metrics = Metrics::new(network_id, CliArgs::version(), cli.crawler.stale_good);
     metrics.load_from(&store);
 
-    let probe_cfg = ProbeInitializerConfig::new(network_id, cli.probe_timeout);
+    let probe_cfg = ProbeInitializerConfig::new(network_id, cli.crawler.probe_timeout);
     let probe = Arc::new(KaspadProbe::new(probe_cfg));
 
     let scheduler_cfg = SchedulerConfig {
         network_id,
-        threads: cli.threads,
-        probe_tick: cli.probe_tick,
-        stale_good: cli.stale_good,
-        stale_bad: cli.stale_bad,
-        dead_after: cli.dead_after,
-        seeders: cli.seeder.iter().cloned().collect(),
-        strict_port: cli.strict_port,
+        threads: cli.crawler.threads,
+        probe_tick: cli.crawler.probe_tick,
+        stale_good: cli.crawler.stale_good,
+        stale_bad: cli.crawler.stale_bad,
+        dead_after: cli.crawler.dead_after,
+        seeders: cli.crawler.seeder.iter().cloned().collect(),
+        strict_port: cli.crawler.strict_port,
     };
     let resolver = Arc::new(TokioResolver);
     let scheduler = Scheduler::new(scheduler_cfg, store.clone(), probe.clone(), resolver, metrics.crawler.clone());
@@ -78,16 +78,16 @@ async fn run(cli: CliArgs) -> Result<()> {
     });
 
     let dns_task = if cli.dns_enabled() {
-        let dns_listen = cli.dns_listen.clone();
+        let dns_listen = cli.dns.dns_listen.clone();
         let dns_cfg = DnsConfig {
-            stale_good: cli.stale_good,
-            min_protocol_version: cli.min_protocol_version,
-            min_user_agent: cli.min_user_agent.clone(),
+            stale_good: cli.crawler.stale_good,
+            min_protocol_version: cli.dns.min_protocol_version,
+            min_user_agent: cli.dns.min_user_agent.clone(),
             ..DnsConfig::new(
                 network_id,
                 dns_listen.clone(),
-                cli.dns_zone.clone().expect("dns_enabled implies dns_zone"),
-                cli.dns_nameserver.clone().expect("dns_enabled implies dns_nameserver"),
+                cli.dns.dns_zone.clone().expect("dns_enabled implies dns_zone"),
+                cli.dns.dns_nameserver.clone().expect("dns_enabled implies dns_nameserver"),
             )
         };
         let tcp_idle = dns_cfg.tcp_idle_timeout;
@@ -105,22 +105,23 @@ async fn run(cli: CliArgs) -> Result<()> {
     };
 
     let http_listen: SocketAddr = cli
+        .http
         .http_listen
         .parse()
-        .with_context(|| format!("invalid --http-listen `{}`", cli.http_listen))?;
+        .with_context(|| format!("invalid --http-listen `{}`", cli.http.http_listen))?;
     let web_cfg = WebConfig {
         listen: http_listen,
-        api_key: cli.api_key.clone(),
-        allowed_origins: cli.allowed_origins.clone(),
-        post_rate_limit: cli.post_rate_limit,
-        rate_limit_window: cli.rate_limit_window,
+        api_key: cli.http.api_key.clone(),
+        allowed_origins: cli.http.allowed_origins.clone(),
+        post_rate_limit: cli.http.post_rate_limit,
+        rate_limit_window: cli.http.rate_limit_window,
         network_default_port: network_id.default_p2p_port(),
-        strict_port: cli.strict_port,
-        api_prefix: cli.api_prefix.clone(),
+        strict_port: cli.crawler.strict_port,
+        api_prefix: cli.http.api_prefix.clone(),
         db_path: store_path.clone(),
-        stale_good: cli.stale_good,
-        min_protocol_version: cli.min_protocol_version,
-        min_user_agent: cli.min_user_agent.clone(),
+        stale_good: cli.crawler.stale_good,
+        min_protocol_version: cli.dns.min_protocol_version,
+        min_user_agent: cli.dns.min_user_agent.clone(),
         service_name: "simply-kaspa-dnsseeder",
         service_version: CliArgs::version(),
     };
@@ -129,7 +130,10 @@ async fn run(cli: CliArgs) -> Result<()> {
         crawler: metrics.crawler.clone(),
         dns: metrics.dns.clone(),
     });
-    let state = AppState::full(store.clone(), prober, web_cfg, metrics.web.clone(), metrics_source);
+    let state = AppState::builder(store.clone(), prober, web_cfg)
+        .metrics(metrics.web.clone())
+        .metrics_source(metrics_source)
+        .build();
     let web_shutdown = shutdown_tx.subscribe();
     let web_task = tokio::spawn(async move {
         match run_web_server(state, web_shutdown).await {
@@ -188,8 +192,8 @@ fn configure_logging(cli: &CliArgs) {
         .target(env_logger::Target::Stdout)
         .format_target(false)
         .format_timestamp_millis()
-        .parse_filters(&cli.log_level)
-        .write_style(if cli.log_no_color {
+        .parse_filters(&cli.logging.log_level)
+        .write_style(if cli.logging.log_no_color {
             env_logger::WriteStyle::Never
         } else {
             env_logger::WriteStyle::Always

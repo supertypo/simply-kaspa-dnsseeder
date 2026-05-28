@@ -24,6 +24,19 @@ const SOA_REFRESH: i32 = 900;
 const SOA_RETRY: i32 = 300;
 const SOA_EXPIRE: i32 = 604_800;
 
+/// Validated query reduced to the fields needed to answer.
+struct QueryPlan {
+    qtype: RecordType,
+    qname: Name,
+}
+
+/// Fully assembled DNS answer (response sections, no header yet).
+struct Answer {
+    answers: Vec<Record>,
+    ns: Vec<Record>,
+    soa: Vec<Record>,
+}
+
 pub struct SeederHandler {
     config: Arc<DnsConfig>,
     store: PeerStore,
@@ -77,6 +90,66 @@ impl SeederHandler {
             RecordType::SOA => vec![self.soa_record()],
             _ => Vec::new(),
         }
+    }
+
+    /// Phase 1 validation: well-formed query at the protocol layer.
+    /// On refusal logs+records metrics and returns `Err(())`.
+    fn parse_basic<'a>(&self, request: &'a Request) -> Result<hickory_server::server::RequestInfo<'a>, ()> {
+        if request.message_type() != MessageType::Query || request.op_code() != OpCode::Query {
+            trace!(
+                "dns: rejecting non-query from {}: type={:?} op={:?}",
+                request.src(),
+                request.message_type(),
+                request.op_code()
+            );
+            self.metrics.record_refused();
+            return Err(());
+        }
+        if let Ok(info) = request.request_info() {
+            Ok(info)
+        } else {
+            self.metrics.record_refused();
+            Err(())
+        }
+    }
+
+    /// Phase 2 validation: query content matches what this zone serves.
+    /// Returns the answer plan or `Err(())` on refusal (logs + metrics handled).
+    fn classify(&self, info: &hickory_server::server::RequestInfo<'_>, src: std::net::SocketAddr) -> Result<QueryPlan, ()> {
+        let qclass = info.query.query_class();
+        if qclass != DNSClass::IN {
+            trace!("dns: refusing non-IN class {qclass:?} from {src}");
+            self.metrics.record_refused();
+            return Err(());
+        }
+        let qtype = info.query.query_type();
+        if !is_allowed_type(qtype) {
+            trace!("dns: refusing type {qtype:?} from {src}");
+            self.metrics.record_refused();
+            return Err(());
+        }
+        let qname: Name = info.query.name().into();
+        if qname != self.apex {
+            self.metrics.record_refused();
+            return Err(());
+        }
+        Ok(QueryPlan { qtype, qname })
+    }
+
+    /// Assemble the full DNS answer (answers + NS/SOA sections) for a validated plan.
+    fn build_answer(&self, qtype: RecordType) -> Answer {
+        let answers = self.build_answers(qtype);
+        let soa = if answers.is_empty() && qtype != RecordType::SOA {
+            vec![self.soa_record()]
+        } else {
+            Vec::new()
+        };
+        let ns = if matches!(qtype, RecordType::A | RecordType::AAAA) {
+            vec![self.ns_record()]
+        } else {
+            Vec::new()
+        };
+        Answer { answers, ns, soa }
     }
 
     fn sample_address_records(&self, family: Family) -> Vec<Record> {
@@ -137,18 +210,7 @@ impl RequestHandler for SeederHandler {
     async fn handle_request<R: ResponseHandler>(&self, request: &Request, response_handle: R) -> ResponseInfo {
         let src = request.src();
 
-        if request.message_type() != MessageType::Query || request.op_code() != OpCode::Query {
-            trace!(
-                "dns: rejecting non-query from {src}: type={:?} op={:?}",
-                request.message_type(),
-                request.op_code()
-            );
-            self.metrics.record_refused();
-            return refuse(request, response_handle).await;
-        }
-
-        let Ok(info) = request.request_info() else {
-            self.metrics.record_refused();
+        let Ok(info) = self.parse_basic(request) else {
             return refuse(request, response_handle).await;
         };
 
@@ -159,46 +221,25 @@ impl RequestHandler for SeederHandler {
             return no_response();
         }
 
-        let qclass = info.query.query_class();
-        if qclass != DNSClass::IN {
-            trace!("dns: refusing non-IN class {qclass:?} from {src}");
-            self.metrics.record_refused();
+        let Ok(plan) = self.classify(&info, src) else {
             return refuse(request, response_handle).await;
-        }
+        };
 
-        let qtype = info.query.query_type();
-        if !is_allowed_type(qtype) {
-            trace!("dns: refusing type {qtype:?} from {src}");
-            self.metrics.record_refused();
-            return refuse(request, response_handle).await;
-        }
-
-        let qname: Name = info.query.name().into();
-        if qname != self.apex {
-            self.metrics.record_refused();
-            return refuse(request, response_handle).await;
-        }
-
-        let answers = self.build_answers(qtype);
+        let answer = self.build_answer(plan.qtype);
         self.metrics
-            .record_answered(qtype == RecordType::A, qtype == RecordType::AAAA, answers.len());
-        debug!("dns: answered {qtype:?} for {qname} from {src} with {} record(s)", answers.len());
+            .record_answered(plan.qtype == RecordType::A, plan.qtype == RecordType::AAAA, answer.answers.len());
+        debug!(
+            "dns: answered {:?} for {} from {src} with {} record(s)",
+            plan.qtype,
+            plan.qname,
+            answer.answers.len()
+        );
+
         let mut header = Header::response_from_request(request.header());
         header.set_authoritative(true);
         header.set_response_code(ResponseCode::NoError);
 
-        let soa = if answers.is_empty() && qtype != RecordType::SOA {
-            vec![self.soa_record()]
-        } else {
-            Vec::new()
-        };
-        let ns = if matches!(qtype, RecordType::A | RecordType::AAAA) {
-            vec![self.ns_record()]
-        } else {
-            Vec::new()
-        };
-
-        send(request, response_handle, header, &answers, &ns, &soa).await
+        send(request, response_handle, header, &answer.answers, &answer.ns, &answer.soa).await
     }
 }
 

@@ -2,6 +2,13 @@
 //!
 //! Stored in the peer-store under a single key so totals survive restarts
 //! (modulo the last in-flight interval).
+//!
+//! Responsibilities are split into three layers:
+//! * [`MetricsSnapshot`] — the persisted shape (with `From`/projection helpers).
+//! * [`codec`] — pure bincode encode/decode.
+//! * [`io`] — store I/O wrapping `get_blob`/`put_blob`.
+//!
+//! [`load`] and [`save`] are thin orchestration functions on top.
 
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};
@@ -43,74 +50,94 @@ pub(super) struct WebSnap {
     pub rejected: u64,
 }
 
+impl MetricsSnapshot {
+    fn build(crawler: &CrawlerSnapshot, dns: &DnsSnapshot, web: &WebSnapshot, now_ms: i64) -> Self {
+        Self {
+            crawler: CrawlerSnap { ok: crawler.ok, failed: crawler.failed },
+            dns: DnsSnap {
+                answered: dns.answered,
+                empty: dns.empty,
+                refused: dns.refused,
+                throttled: dns.throttled,
+                a: dns.a,
+                aaaa: dns.aaaa,
+            },
+            web: WebSnap { requests: web.requests, accepted: web.accepted, rejected: web.rejected },
+            persisted_at_ms: now_ms,
+        }
+    }
+
+    fn restore_into(&self, crawler: &CrawlerMetrics, dns: &DnsMetrics, web: &WebMetrics) {
+        crawler.restore(&CrawlerSnapshot { ok: self.crawler.ok, failed: self.crawler.failed, in_flight: 0 });
+        dns.restore(&DnsSnapshot {
+            answered: self.dns.answered,
+            empty: self.dns.empty,
+            refused: self.dns.refused,
+            throttled: self.dns.throttled,
+            a: self.dns.a,
+            aaaa: self.dns.aaaa,
+        });
+        web.restore(&WebSnapshot { requests: self.web.requests, accepted: self.web.accepted, rejected: self.web.rejected });
+    }
+}
+
+mod codec {
+    use super::MetricsSnapshot;
+
+    pub(super) fn encode(snap: &MetricsSnapshot) -> Result<Vec<u8>, bincode::error::EncodeError> {
+        bincode::serde::encode_to_vec(snap, bincode::config::standard())
+    }
+
+    pub(super) fn decode(bytes: &[u8]) -> Result<MetricsSnapshot, bincode::error::DecodeError> {
+        bincode::serde::decode_from_slice(bytes, bincode::config::standard()).map(|(v, _)| v)
+    }
+}
+
+mod io {
+    use super::METRICS_KEY;
+    use simply_kaspa_dnsseeder_store::{Error, PeerStore};
+
+    pub(super) fn read(store: &PeerStore) -> Result<Option<Vec<u8>>, Error> {
+        store.get_blob(METRICS_KEY)
+    }
+
+    pub(super) fn write(store: &PeerStore, bytes: &[u8]) -> Result<(), Error> {
+        store.put_blob(METRICS_KEY, bytes)
+    }
+}
+
 /// Restore counters from the persisted blob, if any. Silently no-ops on a
 /// missing or unreadable blob — counters simply start at zero.
 pub(super) fn load(store: &PeerStore, crawler: &CrawlerMetrics, dns: &DnsMetrics, web: &WebMetrics) {
-    let raw = match store.get_blob(METRICS_KEY) {
-        Ok(v) => v,
+    let bytes = match io::read(store) {
+        Ok(Some(b)) => b,
+        Ok(None) => return,
         Err(err) => {
             warn!("stats: failed to read persisted snapshot: {err}");
             return;
         }
     };
-    let Some(bytes) = raw else { return };
-    let snap: MetricsSnapshot = match bincode::serde::decode_from_slice(&bytes, bincode::config::standard()) {
-        Ok((v, _)) => v,
+    let snap = match codec::decode(&bytes) {
+        Ok(s) => s,
         Err(err) => {
             warn!("stats: persisted snapshot is unreadable, starting fresh: {err}");
             return;
         }
     };
-    crawler.restore(&CrawlerSnapshot {
-        ok: snap.crawler.ok,
-        failed: snap.crawler.failed,
-        in_flight: 0,
-    });
-    dns.restore(&DnsSnapshot {
-        answered: snap.dns.answered,
-        empty: snap.dns.empty,
-        refused: snap.dns.refused,
-        throttled: snap.dns.throttled,
-        a: snap.dns.a,
-        aaaa: snap.dns.aaaa,
-    });
-    web.restore(&WebSnapshot {
-        requests: snap.web.requests,
-        accepted: snap.web.accepted,
-        rejected: snap.web.rejected,
-    });
+    snap.restore_into(crawler, dns, web);
     debug!("stats: restored snapshot persisted at {}", snap.persisted_at_ms);
 }
 
 pub(super) fn save(store: &PeerStore, crawler: &CrawlerSnapshot, dns: &DnsSnapshot, web: &WebSnapshot, now_ms: i64) {
-    let snap = MetricsSnapshot {
-        crawler: CrawlerSnap {
-            ok: crawler.ok,
-            failed: crawler.failed,
-        },
-        dns: DnsSnap {
-            answered: dns.answered,
-            empty: dns.empty,
-            refused: dns.refused,
-            throttled: dns.throttled,
-            a: dns.a,
-            aaaa: dns.aaaa,
-        },
-        web: WebSnap {
-            requests: web.requests,
-            accepted: web.accepted,
-            rejected: web.rejected,
-        },
-        persisted_at_ms: now_ms,
-    };
-    let bytes = match bincode::serde::encode_to_vec(&snap, bincode::config::standard()) {
+    let snap = MetricsSnapshot::build(crawler, dns, web, now_ms);
+    let bytes = match codec::encode(&snap) {
         Ok(b) => b,
         Err(err) => {
             warn!("stats: failed to encode snapshot: {err}");
             return;
         }
     };
-    if let Err(err) = store.put_blob(METRICS_KEY, &bytes) {
+    if let Err(err) = io::write(store, &bytes) {
         warn!("stats: failed to persist snapshot: {err}");
     }
 }

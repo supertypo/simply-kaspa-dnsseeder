@@ -14,23 +14,23 @@ use crate::state::AppState;
 use crate::system::{collect_disk, collect_process};
 
 pub(crate) async fn handler(State(state): State<AppState>) -> Response {
-    state.metrics.record_request();
+    state.obs.metrics.record_request();
     let now = now_ms();
     let stale_good_ms = duration_to_ms(state.config.stale_good);
-    let summary = match state.store.blocking(move |s| s.summary(now, stale_good_ms)).await {
+    let summary = match state.runtime.store.blocking(move |s| s.summary(now, stale_good_ms)).await {
         Ok(s) => s,
         Err(err) => {
             warn!("web: GET /metrics store error: {err}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response();
         }
     };
-    let process = collect_process(&state.system).await;
+    let process = collect_process(&state.obs.system).await;
     let disk = collect_disk(&state.config.db_path);
-    let web = state.metrics.snapshot();
+    let web = state.obs.metrics.snapshot();
     Json(json!({
         "service": state.config.service_name,
         "version": state.config.service_version,
-        "uptime_ms": state.started.elapsed().as_millis(),
+        "uptime_ms": state.obs.started.elapsed().as_millis(),
         "process": process,
         "disk": disk,
         "peers": {
@@ -47,7 +47,7 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
             "accepted": web.accepted,
             "rejected": web.rejected,
         },
-        "subsystems": state.metrics_source.extra(),
+        "subsystems": state.obs.metrics_source.extra(),
     }))
     .into_response()
 }

@@ -49,7 +49,7 @@ IPv4-mapped IPv6 addresses (`::ffff:1.2.3.4`) are collapsed to plain IPv4 via `c
 `store::Filter` lets the DNS handler filter on `min_protocol_version`, `min_user_agent` (semver), family (A vs AAAA), default port, and `stale_good_ms`. These come from `DnsConfig`, which is hydrated from CLI flags in `dnsseeder/src/main.rs`. Keep `DnsConfig::new` as the "all-defaults" constructor and use struct-update syntax for CLI overrides — don't multiply constructors.
 
 ### `MetricsSource` keeps the web crate independent
-`/api/metrics` needs to surface crawler and dns counters, but the `web` crate must not depend on `crawler` or `dns`. The bridge is `web::MetricsSource { fn extra(&self) -> serde_json::Value; }`, implemented in `dnsseeder::metrics_source::SubsystemMetrics` and injected via `AppState::full`. Add new subsystem metrics there, not in the web crate.
+`/api/metrics` needs to surface crawler and dns counters, but the `web` crate must not depend on `crawler` or `dns`. The bridge is `web::MetricsSource { fn extra(&self) -> serde_json::Value; }`, implemented in `dnsseeder::metrics_source::SubsystemMetrics` and injected via `AppState::builder(...).metrics_source(...)`. Add new subsystem metrics there, not in the web crate.
 
 ### `ThreadRng` is `!Send`
 Any shuffle/sample needs to be in a scoped block (`{ let mut rng = rand::thread_rng(); ... }`) so the RNG drops before any `.await`. Clippy will catch this but the error message is opaque.

@@ -1,5 +1,12 @@
+//! Shared HTTP handler state.
+//!
+//! Grouped along responsibilities:
+//! * [`RuntimeRefs`] — things handlers *use* (store, prober).
+//! * [`ObservabilityCtx`] — things handlers *report* (metrics, system, uptime).
+//! * Top-level: configuration and per-request services (rate limiter, cache).
+
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use simply_kaspa_dnsseeder_store::PeerStore;
 use sysinfo::System;
@@ -12,51 +19,83 @@ use crate::peers_cache::PeersCache;
 use crate::prober::Prober;
 use simply_kaspa_dnsseeder_common::RateLimiter;
 
-/// Shared handler state. Cheap to clone — every field is an `Arc` or
-/// otherwise copy-on-write.
+const PEERS_CACHE_TTL: Duration = Duration::from_secs(5);
+
+/// Things handlers *use* to do work.
 #[derive(Clone)]
-pub struct AppState {
+pub struct RuntimeRefs {
     pub store: PeerStore,
     pub prober: Arc<dyn Prober>,
-    pub config: Arc<WebConfig>,
-    pub limiter: Arc<RateLimiter>,
+}
+
+/// Things handlers *report*: metrics counters, host stats, lifecycle.
+#[derive(Clone)]
+pub struct ObservabilityCtx {
     pub metrics: Arc<WebMetrics>,
     pub metrics_source: Arc<dyn MetricsSource>,
     pub system: Arc<RwLock<System>>,
     pub started: Instant,
+}
+
+/// Shared handler state. Cheap to clone — every field is an `Arc` or `Copy`.
+#[derive(Clone)]
+pub struct AppState {
+    pub runtime: RuntimeRefs,
+    pub obs: ObservabilityCtx,
+    pub config: Arc<WebConfig>,
+    pub limiter: Arc<RateLimiter>,
     pub peers_cache: Arc<PeersCache>,
 }
 
 impl AppState {
-    /// Default constructor: spins up fresh metrics and a null metrics source.
-    /// Use this from tests and any production path that doesn't aggregate
-    /// cross-subsystem metrics.
+    /// Start a builder. Defaults provide fresh `WebMetrics` + a null metrics source,
+    /// suitable for tests. The binary overrides both via [`AppStateBuilder`].
     #[must_use]
-    pub fn new(store: PeerStore, prober: Arc<dyn Prober>, config: WebConfig) -> Self {
-        Self::full(store, prober, config, Arc::new(WebMetrics::new()), Arc::new(NullMetricsSource))
+    pub fn builder(store: PeerStore, prober: Arc<dyn Prober>, config: WebConfig) -> AppStateBuilder {
+        AppStateBuilder::new(store, prober, config)
+    }
+}
+
+/// Builder used to construct [`AppState`] with optional observability overrides.
+pub struct AppStateBuilder {
+    store: PeerStore,
+    prober: Arc<dyn Prober>,
+    config: WebConfig,
+    metrics: Option<Arc<WebMetrics>>,
+    metrics_source: Option<Arc<dyn MetricsSource>>,
+}
+
+impl AppStateBuilder {
+    fn new(store: PeerStore, prober: Arc<dyn Prober>, config: WebConfig) -> Self {
+        Self { store, prober, config, metrics: None, metrics_source: None }
     }
 
-    /// Full constructor for the binary, which already owns shared
-    /// [`WebMetrics`] and an aggregating [`MetricsSource`].
     #[must_use]
-    pub fn full(
-        store: PeerStore,
-        prober: Arc<dyn Prober>,
-        config: WebConfig,
-        metrics: Arc<WebMetrics>,
-        metrics_source: Arc<dyn MetricsSource>,
-    ) -> Self {
-        let limiter = Arc::new(RateLimiter::new(config.post_rate_limit, config.rate_limit_window));
-        Self {
-            store,
-            prober,
-            config: Arc::new(config),
+    pub fn metrics(mut self, metrics: Arc<WebMetrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
+    #[must_use]
+    pub fn metrics_source(mut self, source: Arc<dyn MetricsSource>) -> Self {
+        self.metrics_source = Some(source);
+        self
+    }
+
+    #[must_use]
+    pub fn build(self) -> AppState {
+        let limiter = Arc::new(RateLimiter::new(self.config.post_rate_limit, self.config.rate_limit_window));
+        AppState {
+            runtime: RuntimeRefs { store: self.store, prober: self.prober },
+            obs: ObservabilityCtx {
+                metrics: self.metrics.unwrap_or_else(|| Arc::new(WebMetrics::new())),
+                metrics_source: self.metrics_source.unwrap_or_else(|| Arc::new(NullMetricsSource)),
+                system: Arc::new(RwLock::new(System::new())),
+                started: Instant::now(),
+            },
+            config: Arc::new(self.config),
             limiter,
-            metrics,
-            metrics_source,
-            system: Arc::new(RwLock::new(System::new())),
-            started: Instant::now(),
-            peers_cache: Arc::new(PeersCache::new(std::time::Duration::from_secs(5))),
+            peers_cache: Arc::new(PeersCache::new(PEERS_CACHE_TTL)),
         }
     }
 }

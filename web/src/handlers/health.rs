@@ -15,10 +15,10 @@ use simply_kaspa_dnsseeder_common::{duration_to_ms, now_ms};
 use crate::state::AppState;
 
 pub(crate) async fn handler(State(state): State<AppState>) -> Response {
-    state.metrics.record_request();
+    state.obs.metrics.record_request();
     let now = now_ms();
     let stale_good_ms = duration_to_ms(state.config.stale_good);
-    let summary = match state.store.blocking(move |s| s.summary(now, stale_good_ms)).await {
+    let summary = match state.runtime.store.blocking(move |s| s.summary(now, stale_good_ms)).await {
         Ok(s) => s,
         Err(err) => {
             warn!("web: GET /health store error: {err}");

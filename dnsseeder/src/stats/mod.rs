@@ -21,6 +21,19 @@ use tokio::sync::broadcast;
 
 use self::render::{Block, render};
 
+/// Gathered metrics ready to render and persist. Pure data — no I/O.
+pub(super) struct MetricsReport {
+    block: Block,
+    now_ms: i64,
+}
+
+impl MetricsReport {
+    /// Render the report into log-ready lines.
+    pub(super) fn render(&self) -> Vec<String> {
+        render(&self.block)
+    }
+}
+
 pub struct Metrics {
     pub crawler: Arc<CrawlerMetrics>,
     pub dns: Arc<DnsMetrics>,
@@ -49,21 +62,19 @@ impl Metrics {
         snapshot::load(store, &self.crawler, &self.dns, &self.web);
     }
 
-    /// Emit a single stats block and persist the snapshot.
-    pub fn dump(&self, store: &PeerStore) {
+    /// Gather a snapshot of subsystem counters plus a one-pass store summary.
+    /// Returns `None` if the store summary cannot be fetched.
+    fn snapshot(&self, store: &PeerStore) -> Option<MetricsReport> {
         let now = now_ms();
         let stale_good_ms = i64::try_from(self.stale_good.as_millis()).unwrap_or(i64::MAX);
         let summary = match store.summary(now, stale_good_ms) {
             Ok(s) => s,
             Err(err) => {
                 warn!("stats: store summary failed: {err}");
-                return;
+                return None;
             }
         };
-        let c = self.crawler.snapshot();
-        let d = self.dns.snapshot();
-        let w = self.web.snapshot();
-        for line in render(&Block {
+        let block = Block {
             uptime: self.started.elapsed(),
             network: self.network,
             version: self.version,
@@ -73,13 +84,20 @@ impl Metrics {
             summary_v4: summary.v4,
             summary_v6: summary.v6,
             avg_age: Duration::from_millis(summary.avg_success_age_ms),
-            crawler: c,
-            dns: d,
-            web: w,
-        }) {
+            crawler: self.crawler.snapshot(),
+            dns: self.dns.snapshot(),
+            web: self.web.snapshot(),
+        };
+        Some(MetricsReport { block, now_ms: now })
+    }
+
+    /// Emit a single stats block and persist the snapshot.
+    pub fn dump(&self, store: &PeerStore) {
+        let Some(report) = self.snapshot(store) else { return };
+        for line in report.render() {
             info!("{line}");
         }
-        snapshot::save(store, &c, &d, &w, now);
+        snapshot::save(store, &report.block.crawler, &report.block.dns, &report.block.web, report.now_ms);
     }
 }
 

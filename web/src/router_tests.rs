@@ -62,7 +62,7 @@ fn make_state(prober: Arc<dyn Prober>, store: PeerStore, api_key: Option<String>
         service_name: "test",
         service_version: "0.0.0",
     };
-    AppState::new(store, prober, cfg)
+    AppState::builder(store, prober, cfg).build()
 }
 
 fn seeded_store() -> (TempDir, PeerStore) {
@@ -269,7 +269,7 @@ async fn rate_limit_blocks_repeated_posts() {
         service_name: "test",
         service_version: "0.0.0",
     };
-    let state = AppState::new(store, Arc::new(MockProber::default()), cfg);
+    let state = AppState::builder(store, Arc::new(MockProber::default()), cfg).build();
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
 
     let mut svc = app;
@@ -379,7 +379,7 @@ async fn list_peers_applies_protocol_version_filter_unless_all() {
         service_name: "test",
         service_version: "0.0.0",
     };
-    let state = AppState::new(store, Arc::new(MockProber::default()), cfg);
+    let state = AppState::builder(store, Arc::new(MockProber::default()), cfg).build();
     let app = build_router(state);
 
     let res = app

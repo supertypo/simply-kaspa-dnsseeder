@@ -47,19 +47,19 @@ fn list_filter(cfg: &WebConfig, all: bool) -> Filter {
 }
 
 pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {
-    state.metrics.record_request();
+    state.obs.metrics.record_request();
     "pong"
 }
 
 pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>, headers: HeaderMap) -> Response {
-    state.metrics.record_request();
+    state.obs.metrics.record_request();
     let expose = expose_ip(&headers, state.config.api_key.as_deref());
     let cache_key = crate::peers_cache::Key { all: q.all, expose };
     if let Some(body) = state.peers_cache.get(cache_key) {
         return ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response();
     }
     let filter = list_filter(&state.config, q.all);
-    let mut records = match state.store.blocking(move |s| s.collect_matching(&filter)).await {
+    let mut records = match state.runtime.store.blocking(move |s| s.collect_matching(&filter)).await {
         Ok(v) => v,
         Err(err) => {
             warn!("web: GET /peers store error: {err}");
@@ -88,7 +88,7 @@ pub(crate) async fn get(
     Query(q): Query<ListQuery>,
     headers: HeaderMap,
 ) -> Response {
-    state.metrics.record_request();
+    state.obs.metrics.record_request();
     let Ok(addr) = SocketAddr::from_str(&addr_str) else {
         return (StatusCode::BAD_REQUEST, "addr must be ip:port").into_response();
     };
@@ -97,7 +97,7 @@ pub(crate) async fn get(
         port: addr.port(),
     };
     let filter = list_filter(&state.config, q.all);
-    match state.store.blocking(move |s| s.get(&net)).await {
+    match state.runtime.store.blocking(move |s| s.get(&net)).await {
         Ok(Some(rec)) if filter.matches(&rec) => {
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
             Json(PeerDto::from_record(&rec, expose)).into_response()
@@ -116,11 +116,11 @@ pub(crate) async fn submit(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    state.metrics.record_request();
+    state.obs.metrics.record_request();
     if let Some(expected) = state.config.api_key.as_deref() {
         let presented = headers.get(&X_API_KEY).and_then(|v| v.to_str().ok());
         if presented != Some(expected) {
-            state.metrics.record_rejected();
+            state.obs.metrics.record_rejected();
             return (StatusCode::UNAUTHORIZED, "missing or invalid api key").into_response();
         }
     }
@@ -128,19 +128,19 @@ pub(crate) async fn submit(
     if !state.config.allowed_origins.is_empty() {
         let origin = headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok()).unwrap_or("");
         if !state.config.allowed_origins.iter().any(|o| o == origin) {
-            state.metrics.record_rejected();
+            state.obs.metrics.record_rejected();
             return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
         }
     }
 
     let client = client_ip(&headers, remote);
     if !state.limiter.check(client) {
-        state.metrics.record_rejected();
+        state.obs.metrics.record_rejected();
         return (StatusCode::TOO_MANY_REQUESTS, "rate limited").into_response();
     }
 
     let Ok(addr) = SocketAddr::from_str(body.trim()) else {
-        state.metrics.record_rejected();
+        state.obs.metrics.record_rejected();
         return (StatusCode::BAD_REQUEST, "invalid ip:port").into_response();
     };
 
@@ -149,7 +149,7 @@ pub(crate) async fn submit(
         port: addr.port(),
     };
     if !is_acceptable_address(&net, state.config.network_default_port, state.config.strict_port) {
-        state.metrics.record_rejected();
+        state.obs.metrics.record_rejected();
         return (
             StatusCode::BAD_REQUEST,
             "address is not publicly routable or uses a disallowed port",
@@ -158,15 +158,15 @@ pub(crate) async fn submit(
     }
     let addr = SocketAddr::new(net.ip, net.port);
 
-    match state.prober.probe(addr).await {
+    match state.runtime.prober.probe(addr).await {
         Ok(rec) => {
-            state.metrics.record_accepted();
+            state.obs.metrics.record_accepted();
             debug!("web: POST /peers accepted {addr} (probe ok)");
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
             (StatusCode::OK, Json(PeerDto::from_record(&rec, expose))).into_response()
         }
         Err(err) => {
-            state.metrics.record_rejected();
+            state.obs.metrics.record_rejected();
             debug!("web: POST /peers probe of {addr} failed: {err}");
             (StatusCode::BAD_GATEWAY, format!("probe failed: {err}")).into_response()
         }
