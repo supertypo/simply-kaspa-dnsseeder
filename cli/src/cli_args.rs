@@ -54,9 +54,9 @@ pub struct CrawlerArgs {
     #[clap(long, default_value = "8", value_parser = parse_positive_usize)]
     pub threads: usize,
 
-    /// Number of address-list requests sent to each healthy peer within one probe (1..=10).
+    /// Number of address-list requests sent to each healthy peer within one probe.
     /// Higher values surface more peer addresses per visit at the cost of keeping the
-    /// connection open ~250 ms longer per extra round.
+    /// connection open longer per extra round.
     #[clap(long, default_value_t = 3, value_parser = clap::value_parser!(u8).range(1..=10))]
     pub probes_per_peer: u8,
 

@@ -31,7 +31,7 @@ pub(crate) type PendingMap = Arc<DashMap<std::net::SocketAddr, ProbeChannel>>;
 pub struct ProbeInitializerConfig {
     pub network_id: kaspa_consensus_core::network::NetworkId,
     pub probe_timeout: Duration,
-    /// Number of back-to-back `RequestAddresses` rounds per probe (1..=10).
+    /// Number of back-to-back `RequestAddresses` rounds per probe.
     pub probes_per_peer: u8,
 }
 

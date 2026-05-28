@@ -190,7 +190,7 @@ async fn ignores_peers_whose_last_success_is_too_old() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let now = current_now_ms();
-    // last_success 16 minutes ago — past the default 15m stale_good window.
+    // last_success well past the configured stale_good window.
     let stale_ts = now - 16 * 60 * 1000;
     let mut stale = make_record(1, IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), stale_ts);
     // first_seen/last_seen recent enough to escape pruning, last_attempt recent too.

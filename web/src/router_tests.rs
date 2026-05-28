@@ -70,7 +70,7 @@ fn seeded_store() -> (TempDir, PeerStore) {
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let mut id = [0u8; 16];
     id[0] = 0x11;
-    // Use a recent timestamp so the peer falls within the test stale_good window (900s).
+    // Use a recent timestamp so the peer falls within the test stale_good window.
     let now = i64::try_from(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

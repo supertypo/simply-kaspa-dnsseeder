@@ -3,7 +3,7 @@
 //! The seeder is authoritative for a single apex name (`--dns-zone`) and only
 //! answers `A`, `AAAA`, `NS` and `SOA` queries for that exact name. Anything
 //! else gets `REFUSED`. Address records are served from a small in-memory
-//! `ServingCache` rebuilt every 60s from
+//! `ServingCache` periodically rebuilt from
 //! [`simply_kaspa_dnsseeder_store::PeerStore`].
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc, clippy::missing_panics_doc)]

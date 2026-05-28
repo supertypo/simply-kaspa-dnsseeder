@@ -28,7 +28,9 @@ pub struct ServingCache {
 impl ServingCache {
     #[must_use]
     pub fn new() -> Self {
-        Self { inner: Mutex::new(Arc::new(Snapshot::default())) }
+        Self {
+            inner: Mutex::new(Arc::new(Snapshot::default())),
+        }
     }
 
     pub fn load(&self) -> Arc<Snapshot> {
@@ -168,19 +170,25 @@ mod tests {
         let store = PeerStore::open(temp.path().join("p.redb")).unwrap();
         let (config, port) = cfg();
         let base = now_ms();
-        // Five v4 with strictly ordered (recent) success timestamps; cap of 3 keeps the freshest.
+        // Distinct, strictly ordered success timestamps so freshness ordering is unambiguous.
         for (i, offset) in [5_000, 1_000, 4_000, 2_000, 3_000].into_iter().enumerate() {
             #[allow(clippy::cast_possible_truncation)]
             let id = i as u8 + 1;
-            store.upsert(&rec(id, IpAddr::V4(Ipv4Addr::new(10, 0, 0, id)), base - offset, port)).unwrap();
+            store
+                .upsert(&rec(id, IpAddr::V4(Ipv4Addr::new(10, 0, 0, id)), base - offset, port))
+                .unwrap();
         }
         store.upsert(&rec(99, IpAddr::V6(Ipv6Addr::LOCALHOST), base - 1_000, port)).unwrap();
 
         let snap = build_snapshot(&store, &config, port, 3);
         assert_eq!(snap.v4.len(), 3);
         assert_eq!(snap.v6.len(), 1);
-        // Smallest offsets (freshest) are 1_000, 2_000, 3_000 → ids 2, 4, 5.
-        let v4_ids: Vec<u8> = snap.v4.iter().filter_map(|ip| if let IpAddr::V4(v) = ip { Some(v.octets()[3]) } else { None }).collect();
+        // Smallest offsets (freshest) survive truncation.
+        let v4_ids: Vec<u8> = snap
+            .v4
+            .iter()
+            .filter_map(|ip| if let IpAddr::V4(v) = ip { Some(v.octets()[3]) } else { None })
+            .collect();
         assert_eq!(v4_ids, vec![2, 4, 5]);
     }
 
@@ -190,8 +198,12 @@ mod tests {
         let store = PeerStore::open(temp.path().join("p.redb")).unwrap();
         let (config, port) = cfg();
         let base = now_ms();
-        store.upsert(&rec(1, IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), base - 1_000, port)).unwrap();
-        store.upsert(&rec(2, IpAddr::V4(Ipv4Addr::new(2, 2, 2, 2)), base - 1_000, port + 1)).unwrap();
+        store
+            .upsert(&rec(1, IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), base - 1_000, port))
+            .unwrap();
+        store
+            .upsert(&rec(2, IpAddr::V4(Ipv4Addr::new(2, 2, 2, 2)), base - 1_000, port + 1))
+            .unwrap();
         let snap = build_snapshot(&store, &config, port, 10);
         assert_eq!(snap.v4.len(), 1);
     }

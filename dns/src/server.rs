@@ -34,7 +34,15 @@ pub fn build_serving_cache(
     let p2p_port = config.network_id.default_p2p_port();
     let cap = config.max_records.saturating_mul(SNAPSHOT_MULTIPLIER);
     serving_cache::refresh_now(&cache, &store, config, p2p_port, cap);
-    let handle = serving_cache::spawn_refresher(cache.clone(), store, Arc::new(config.clone()), p2p_port, cap, REFRESH_INTERVAL, shutdown);
+    let handle = serving_cache::spawn_refresher(
+        cache.clone(),
+        store,
+        Arc::new(config.clone()),
+        p2p_port,
+        cap,
+        REFRESH_INTERVAL,
+        shutdown,
+    );
     (cache, handle)
 }
 

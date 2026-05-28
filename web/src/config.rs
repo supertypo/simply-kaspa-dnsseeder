@@ -24,7 +24,7 @@ pub struct WebConfig {
     pub network_default_port: u16,
     /// When true, `POST /peers` rejects any address whose port isn't `network_default_port`.
     pub strict_port: bool,
-    /// URL prefix prepended to every route (`/api` by default; `""` serves at root).
+    /// URL prefix prepended to every route (empty string serves at the root).
     pub api_prefix: String,
     /// Path to the on-disk peer store, used for `db_size` metric.
     pub db_path: PathBuf,
