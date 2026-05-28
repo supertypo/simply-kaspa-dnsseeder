@@ -8,13 +8,14 @@ use hickory_proto::rr::rdata::{A, AAAA, NS, SOA};
 use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use hickory_server::authority::MessageResponseBuilder;
 use hickory_server::server::{Request, RequestHandler, RequestInfo, ResponseHandler, ResponseInfo};
-use log::{debug, trace, warn};
+use log::{debug, trace};
 use rand::seq::SliceRandom;
-use simply_kaspa_dnsseeder_common::{RateLimiter, duration_to_ms, now_ms};
-use simply_kaspa_dnsseeder_store::{Family, Filter, PeerStore};
+use simply_kaspa_dnsseeder_common::RateLimiter;
+use simply_kaspa_dnsseeder_store::Family;
 
 use crate::config::DnsConfig;
 use crate::metrics::DnsMetrics;
+use crate::serving_cache::ServingCache;
 
 // musl-libc treats an empty AAAA reply as a hard failure (no A fallback).
 // `100::` is the IETF discard prefix — harmless if dialed.
@@ -23,6 +24,11 @@ const MUSL_AAAA_SENTINEL: std::net::Ipv6Addr = std::net::Ipv6Addr::new(0x100, 0,
 const SOA_REFRESH: i32 = 900;
 const SOA_RETRY: i32 = 300;
 const SOA_EXPIRE: i32 = 604_800;
+
+// Per-record TTLs mirror the Go seeder: short for answer records so clients
+// refresh stale peers quickly, long for the NS RRset which rarely changes.
+const A_TTL_SECONDS: u32 = 30;
+const NS_TTL_SECONDS: u32 = 86_400;
 
 /// Validated query reduced to the fields needed to answer.
 struct QueryPlan {
@@ -39,33 +45,34 @@ struct Answer {
 
 pub struct SeederHandler {
     config: Arc<DnsConfig>,
-    store: PeerStore,
+    serving: Arc<ServingCache>,
     apex: Name,
     nameserver: Name,
     hostmaster: Name,
-    p2p_port: u16,
     rate_limit: Arc<RateLimiter>,
     metrics: Arc<DnsMetrics>,
 }
 
 impl SeederHandler {
-    pub fn new(config: DnsConfig, store: PeerStore) -> Result<Self, hickory_proto::ProtoError> {
-        Self::with_metrics(config, store, Arc::new(DnsMetrics::new()))
+    pub fn new(config: DnsConfig, serving: Arc<ServingCache>) -> Result<Self, hickory_proto::ProtoError> {
+        Self::with_metrics(config, serving, Arc::new(DnsMetrics::new()))
     }
 
-    pub fn with_metrics(config: DnsConfig, store: PeerStore, metrics: Arc<DnsMetrics>) -> Result<Self, hickory_proto::ProtoError> {
+    pub fn with_metrics(
+        config: DnsConfig,
+        serving: Arc<ServingCache>,
+        metrics: Arc<DnsMetrics>,
+    ) -> Result<Self, hickory_proto::ProtoError> {
         let apex = fqdn(&config.dns_zone)?;
         let nameserver = fqdn(&config.nameserver)?;
         let hostmaster = Name::from_str("hostmaster.")?.append_domain(&apex)?;
-        let p2p_port = config.network_id.default_p2p_port();
         let rate_limit = Arc::new(RateLimiter::new(config.queries_per_ip_per_second, config.rate_limit_window));
         Ok(Self {
             config: Arc::new(config),
-            store,
+            serving,
             apex,
             nameserver,
             hostmaster,
-            p2p_port,
             rate_limit,
             metrics,
         })
@@ -148,39 +155,27 @@ impl SeederHandler {
     }
 
     fn sample_address_records(&self, family: Family) -> Vec<Record> {
-        let filter = Filter::serving(
-            now_ms(),
-            duration_to_ms(self.config.stale_good),
-            self.config.min_protocol_version,
-            self.config.min_user_agent.clone(),
-            Some(family),
-            Some(self.p2p_port),
-        );
-        let peers = match self.store.collect_matching(&filter) {
-            Ok(v) => v,
-            Err(err) => {
-                warn!("dns: store lookup failed: {err}");
-                return Vec::new();
-            }
+        let snap = self.serving.load();
+        let pool: &[IpAddr] = match family {
+            Family::V4 => &snap.v4,
+            Family::V6 => &snap.v6,
         };
         let max = self.config.max_records;
         let mut rng = rand::thread_rng();
-        let mut out = Vec::with_capacity(max.min(peers.len()));
-        for peer in peers.choose_multiple(&mut rng, max) {
-            match peer.address.ip {
-                IpAddr::V4(v4) => out.push(self.address_record(RData::A(A(v4)))),
-                IpAddr::V6(v6) => out.push(self.address_record(RData::AAAA(AAAA(v6)))),
-            }
-        }
-        out
+        pool.choose_multiple(&mut rng, max)
+            .map(|ip| match ip {
+                IpAddr::V4(v4) => self.address_record(RData::A(A(*v4))),
+                IpAddr::V6(v6) => self.address_record(RData::AAAA(AAAA(*v6))),
+            })
+            .collect()
     }
 
     fn address_record(&self, data: RData) -> Record {
-        Record::from_rdata(self.apex.clone(), self.config.ttl_seconds, data)
+        Record::from_rdata(self.apex.clone(), A_TTL_SECONDS, data)
     }
 
     fn ns_record(&self) -> Record {
-        Record::from_rdata(self.apex.clone(), self.config.ttl_seconds, RData::NS(NS(self.nameserver.clone())))
+        Record::from_rdata(self.apex.clone(), NS_TTL_SECONDS, RData::NS(NS(self.nameserver.clone())))
     }
 
     fn soa_record(&self) -> Record {
@@ -194,9 +189,9 @@ impl SeederHandler {
             SOA_REFRESH,
             SOA_RETRY,
             SOA_EXPIRE,
-            self.config.ttl_seconds,
+            A_TTL_SECONDS,
         );
-        Record::from_rdata(self.apex.clone(), self.config.ttl_seconds, RData::SOA(rdata))
+        Record::from_rdata(self.apex.clone(), A_TTL_SECONDS, RData::SOA(rdata))
     }
 }
 

@@ -18,7 +18,7 @@ use kaspa_consensus_core::network::NetworkId;
 use log::{error, info, warn};
 use simply_kaspa_dnsseeder_cli::CliArgs;
 use simply_kaspa_dnsseeder_crawler::{KaspadProbe, ProbeInitializerConfig, Scheduler, SchedulerConfig, TokioResolver};
-use simply_kaspa_dnsseeder_dns::{DnsConfig, SeederHandler};
+use simply_kaspa_dnsseeder_dns::{DnsConfig, SeederHandler, build_serving_cache};
 use simply_kaspa_dnsseeder_store::PeerStore;
 use simply_kaspa_dnsseeder_web::{AppState, MetricsSource, SchedulerProber, WebConfig, run_web_server};
 use tokio::signal::unix::{SignalKind, signal};
@@ -91,8 +91,10 @@ async fn run(cli: CliArgs) -> Result<()> {
             )
         };
         let tcp_idle = dns_cfg.tcp_idle_timeout;
-        let handler = SeederHandler::with_metrics(dns_cfg, store.clone(), metrics.dns.clone()).context("building dns handler")?;
         let dns_shutdown = shutdown_tx.subscribe();
+        let (serving_cache, _refresher) = build_serving_cache(&dns_cfg, store.clone(), shutdown_tx.subscribe());
+        let handler =
+            SeederHandler::with_metrics(dns_cfg, serving_cache, metrics.dns.clone()).context("building dns handler")?;
         Some(tokio::spawn(async move {
             match simply_kaspa_dnsseeder_dns::run_dns_server_with_handler(handler, dns_listen, tcp_idle, dns_shutdown).await {
                 Ok(()) => info!("dns: shut down cleanly"),

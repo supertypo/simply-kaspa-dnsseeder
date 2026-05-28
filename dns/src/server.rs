@@ -1,5 +1,6 @@
 use std::io;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use hickory_server::ServerFuture;
@@ -11,12 +12,30 @@ use tokio::net::{TcpListener, UdpSocket};
 use crate::config::DnsConfig;
 use crate::error::Error;
 use crate::handler::SeederHandler;
+use crate::serving_cache::{self, REFRESH_INTERVAL, SNAPSHOT_MULTIPLIER, ServingCache};
 
 pub async fn run_dns_server(config: DnsConfig, store: PeerStore, shutdown: tokio::sync::broadcast::Receiver<()>) -> Result<(), Error> {
     let listen = config.dns_listen.clone();
     let tcp_idle = config.tcp_idle_timeout;
-    let handler = SeederHandler::new(config, store)?;
+    let (cache, _refresher) = build_serving_cache(&config, store, shutdown.resubscribe());
+    let handler = SeederHandler::new(config, cache)?;
     run_dns_server_with_handler(handler, listen, tcp_idle, shutdown).await
+}
+
+/// Build the serving cache, do a synchronous initial refresh so the first
+/// query sees current data, and spawn the periodic refresher.
+#[must_use]
+pub fn build_serving_cache(
+    config: &DnsConfig,
+    store: PeerStore,
+    shutdown: tokio::sync::broadcast::Receiver<()>,
+) -> (Arc<ServingCache>, tokio::task::JoinHandle<()>) {
+    let cache = Arc::new(ServingCache::new());
+    let p2p_port = config.network_id.default_p2p_port();
+    let cap = config.max_records.saturating_mul(SNAPSHOT_MULTIPLIER);
+    serving_cache::refresh_now(&cache, &store, config, p2p_port, cap);
+    let handle = serving_cache::spawn_refresher(cache.clone(), store, Arc::new(config.clone()), p2p_port, cap, REFRESH_INTERVAL, shutdown);
+    (cache, handle)
 }
 
 pub async fn run_dns_server_with_handler(
