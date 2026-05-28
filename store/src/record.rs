@@ -17,16 +17,24 @@ pub struct NetAddress {
 /// kaspa subnetwork identifier when present.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerRecord {
-    pub id: PeerId,
-    pub protocol_version: u32,
-    pub timestamp_ms: i64,
+    // Network identity.
     pub address: NetAddress,
+    pub id: PeerId,
+
+    // Handshake metadata reported by the peer.
+    pub protocol_version: u32,
     pub user_agent: String,
     pub subnetwork_id: Option<[u8; 20]>,
+    /// Peer-reported version-message timestamp (unix ms).
+    pub timestamp_ms: i64,
+
+    // Observation lifecycle: when we *saw* this peer.
     pub first_seen_ms: i64,
+    pub last_seen_ms: i64,
+
+    // Probe lifecycle: when we *contacted* this peer.
     pub last_attempt_ms: i64,
     pub last_success_ms: i64,
-    pub last_seen_ms: i64,
 }
 
 impl PeerRecord {

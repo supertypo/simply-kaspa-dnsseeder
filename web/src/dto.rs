@@ -24,10 +24,10 @@ pub enum PeerDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicPeerDto {
+    pub port: u16,
     pub protocol_version: Option<u32>,
     pub user_agent: Option<String>,
     pub kaspad_version: Option<String>,
-    pub port: u16,
     pub last_success_ms: Option<i64>,
     pub last_success: Option<String>,
 }
@@ -35,19 +35,26 @@ pub struct PublicPeerDto {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FullPeerDto {
+    // Address.
+    pub ip: String,
+    pub port: u16,
     pub id: Option<String>,
+
+    // Handshake metadata.
     pub protocol_version: Option<u32>,
     pub user_agent: Option<String>,
     pub kaspad_version: Option<String>,
-    pub ip: String,
-    pub port: u16,
+
+    // Observation lifecycle.
     pub first_seen_ms: i64,
-    pub last_seen_ms: i64,
-    pub last_attempt_ms: Option<i64>,
-    pub last_success_ms: Option<i64>,
     pub first_seen: String,
+    pub last_seen_ms: i64,
     pub last_seen: String,
+
+    // Probe lifecycle.
+    pub last_attempt_ms: Option<i64>,
     pub last_attempt: Option<String>,
+    pub last_success_ms: Option<i64>,
     pub last_success: Option<String>,
 }
 
@@ -82,10 +89,10 @@ impl PublicPeerDto {
     #[must_use]
     pub fn from_record(rec: &PeerRecord) -> Self {
         Self {
+            port: rec.address.port,
             protocol_version: opt_protocol(rec.protocol_version),
             user_agent: opt_string(&rec.user_agent),
             kaspad_version: PeerRecord::parse_kaspad_version(&rec.user_agent).map(|v| v.to_string()),
-            port: rec.address.port,
             last_success_ms: opt_ms(rec.last_success_ms),
             last_success: opt_ms(rec.last_success_ms).map(format_iso),
         }
@@ -96,19 +103,19 @@ impl FullPeerDto {
     #[must_use]
     pub fn from_record(rec: &PeerRecord) -> Self {
         Self {
+            ip: rec.address.ip.to_string(),
+            port: rec.address.port,
             id: opt_id(rec.id),
             protocol_version: opt_protocol(rec.protocol_version),
             user_agent: opt_string(&rec.user_agent),
             kaspad_version: PeerRecord::parse_kaspad_version(&rec.user_agent).map(|v| v.to_string()),
-            ip: rec.address.ip.to_string(),
-            port: rec.address.port,
             first_seen_ms: rec.first_seen_ms,
-            last_seen_ms: rec.last_seen_ms,
-            last_attempt_ms: opt_ms(rec.last_attempt_ms),
-            last_success_ms: opt_ms(rec.last_success_ms),
             first_seen: format_iso(rec.first_seen_ms),
+            last_seen_ms: rec.last_seen_ms,
             last_seen: format_iso(rec.last_seen_ms),
+            last_attempt_ms: opt_ms(rec.last_attempt_ms),
             last_attempt: opt_ms(rec.last_attempt_ms).map(format_iso),
+            last_success_ms: opt_ms(rec.last_success_ms),
             last_success: opt_ms(rec.last_success_ms).map(format_iso),
         }
     }
