@@ -39,7 +39,20 @@ That's the whole minimum: network, zone, nameserver FQDN, where to listen for DN
 
 - DNS server activates only when both `--dns-zone` and `--dns-nameserver` are set.
 - Binding port 53 typically needs `sudo` or `CAP_NET_BIND_SERVICE`.
-- With `--api-key` set, `POST /peers` requires the key (`Authorization: Bearer <key>` or `X-Api-Key: <key>`) and `GET /peers` only includes the raw `ip` field when the request is authenticated.
+- With `--api-key` set, `POST /api/peers` requires the key (`Authorization: Bearer <key>` or `X-Api-Key: <key>`) and `GET /api/peers` only includes the raw `ip` field when the request is authenticated.
+
+### HTTP endpoints
+
+All HTTP endpoints are served under the `--api-prefix` (default `/api`); pass `--api-prefix ""` to serve at the root.
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/api/ping` | GET | Liveness; returns `pong` |
+| `/api/health` | GET | `200 OK` while at least one peer succeeded inside `--stale-good`, otherwise `503` |
+| `/api/metrics` | GET | JSON dump: process (cpu/mem), disk usage, peer-store summary, per-subsystem counters |
+| `/api/peers` | GET | All peers as JSON, sorted by most-recent success first |
+| `/api/peers` | POST | Body `ip:port`; probes the peer and stores it on success (rate-limited, may need API key) |
+| `/api/peers/{ip:port}` | GET | Single peer lookup |
 
 ### Mainnet example
 
@@ -66,6 +79,8 @@ simply-kaspa-dnsseeder \
 | `--min-protocol-version` | _unset_ | Filter DNS answers by minimum protocol version |
 | `--min-user-agent` | _unset_ | Filter DNS answers by minimum kaspad semver (e.g. `1.1.0`) |
 | `--datadir` | `data` | Persistent storage directory |
+| `--api-prefix` | `/api` | URL prefix for HTTP endpoints (`""` serves at root) |
+| `--stats-interval` | `1m` | Periodic in-process stats dump cadence; `0s` disables |
 
 Run `simply-kaspa-dnsseeder --help` for the full list.
 

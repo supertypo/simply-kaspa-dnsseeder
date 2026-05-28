@@ -26,6 +26,9 @@ serde_json.workspace = true
 chrono.workspace = true
 hex.workspace = true
 dashmap.workspace = true
+sysinfo.workspace = true
+bytesize.workspace = true
+humantime.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -23,12 +23,27 @@ const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
 pub fn build_router(state: AppState) -> Router {
-    Router::new()
+    let prefix = normalize_prefix(&state.config.api_prefix);
+    let api = Router::new()
         .route("/ping", get(ping))
         .route("/health", get(health))
+        .route("/metrics", get(metrics))
         .route("/peers", get(list_peers).post(submit_peer))
         .route("/peers/{addr}", get(get_peer))
-        .with_state(state)
+        .with_state(state);
+    if prefix.is_empty() {
+        api
+    } else {
+        Router::new().nest(&prefix, api)
+    }
+}
+
+fn normalize_prefix(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.starts_with('/') { trimmed.to_string() } else { format!("/{trimmed}") }
 }
 
 async fn ping(State(state): State<AppState>) -> &'static str {
@@ -38,13 +53,133 @@ async fn ping(State(state): State<AppState>) -> &'static str {
 
 async fn health(State(state): State<AppState>) -> Response {
     state.metrics.record_request();
-    match state.store.len() {
-        Ok(count) => Json(json!({ "status": "ok", "peers": count })).into_response(),
+    let now = now_ms();
+    let stale_good_ms = i64::try_from(state.config.stale_good.as_millis()).unwrap_or(i64::MAX);
+    let summary = match state.store.summary(now, stale_good_ms) {
+        Ok(s) => s,
         Err(err) => {
             warn!("/health store error: {err}");
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "status": "error" }))).into_response()
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"status": "down", "reason": "store error"})),
+            )
+                .into_response();
+        }
+    };
+    if summary.good > 0 {
+        Json(json!({
+            "status": "ok",
+            "good": summary.good,
+            "total": summary.total,
+            "service": state.config.service_name,
+            "version": state.config.service_version,
+        }))
+        .into_response()
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
+                "status": "down",
+                "reason": "no peers with successful probe within stale-good window",
+                "total": summary.total,
+                "service": state.config.service_name,
+                "version": state.config.service_version,
+            })),
+        )
+            .into_response()
+    }
+}
+
+async fn metrics(State(state): State<AppState>) -> Response {
+    state.metrics.record_request();
+    let now = now_ms();
+    let stale_good_ms = i64::try_from(state.config.stale_good.as_millis()).unwrap_or(i64::MAX);
+    let summary = match state.store.summary(now, stale_good_ms) {
+        Ok(s) => s,
+        Err(err) => {
+            warn!("/metrics store error: {err}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response();
+        }
+    };
+    let process = collect_process(&state).await;
+    let disk = collect_disk(&state.config.db_path);
+    let web = state.metrics.snapshot();
+    let body = json!({
+        "service": state.config.service_name,
+        "version": state.config.service_version,
+        "uptime_ms": state.started.elapsed().as_millis(),
+        "process": process,
+        "disk": disk,
+        "peers": {
+            "total": summary.total,
+            "good": summary.good,
+            "failed": summary.failed,
+            "v4": summary.v4,
+            "v6": summary.v6,
+            "avg_success_age_ms": summary.avg_success_age_ms,
+        },
+        "web": {
+            "requests": web.requests,
+            "accepted": web.accepted,
+            "rejected": web.rejected,
+        },
+        "subsystems": state.metrics_source.extra(),
+    });
+    Json(body).into_response()
+}
+
+async fn collect_process(state: &AppState) -> serde_json::Value {
+    use sysinfo::{Pid, ProcessRefreshKind};
+    let pid = Pid::from_u32(std::process::id());
+    let mut system = state.system.write().await;
+    system.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&[pid]),
+        false,
+        ProcessRefreshKind::new().with_cpu().with_memory(),
+    );
+    system.refresh_memory();
+    let (cpu, mem_used) = if let Some(proc_) = system.process(pid) {
+        ((proc_.cpu_usage() * 10.0).round() / 10.0, proc_.memory())
+    } else {
+        (0.0_f32, 0_u64)
+    };
+    let mem_free = if system.available_memory() > 0 { system.available_memory() } else { system.free_memory() };
+    json!({
+        "cpu_used_percent": cpu,
+        "memory_used_bytes": mem_used,
+        "memory_used_pretty": bytesize::ByteSize(mem_used).to_string(),
+        "memory_free_bytes": mem_free,
+        "memory_free_pretty": bytesize::ByteSize(mem_free).to_string(),
+    })
+}
+
+fn collect_disk(db_path: &std::path::Path) -> serde_json::Value {
+    let db_size_bytes = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let canonical = std::fs::canonicalize(db_path).unwrap_or_else(|_| db_path.to_path_buf());
+    let mut best: Option<&sysinfo::Disk> = None;
+    let mut best_len = 0usize;
+    for disk in disks.list() {
+        let mp = disk.mount_point();
+        if canonical.starts_with(mp) && mp.as_os_str().len() > best_len {
+            best_len = mp.as_os_str().len();
+            best = Some(disk);
         }
     }
+    let (free_bytes, total_bytes, mount) = match best {
+        Some(d) => (d.available_space(), d.total_space(), d.mount_point().display().to_string()),
+        None => (0, 0, String::new()),
+    };
+    json!({
+        "db_path": db_path.display().to_string(),
+        "db_size_bytes": db_size_bytes,
+        "db_size_pretty": bytesize::ByteSize(db_size_bytes).to_string(),
+        "mount_point": mount,
+        "free_bytes": free_bytes,
+        "free_pretty": bytesize::ByteSize(free_bytes).to_string(),
+        "total_bytes": total_bytes,
+        "total_pretty": bytesize::ByteSize(total_bytes).to_string(),
+    })
 }
 
 async fn list_peers(State(state): State<AppState>, headers: HeaderMap) -> Response {

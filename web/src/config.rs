@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Configuration for the HTTP server. None of these values are mutable at
@@ -21,4 +22,14 @@ pub struct WebConfig {
     pub network_default_port: u16,
     /// When true, `POST /peers` rejects any address whose port isn't `network_default_port`.
     pub strict_port: bool,
+    /// URL prefix prepended to every route (`/api` by default; `""` serves at root).
+    pub api_prefix: String,
+    /// Path to the on-disk peer store, used for `db_size` metric.
+    pub db_path: PathBuf,
+    /// Stale-good window used by `/health` and `/metrics` to count "good" peers.
+    pub stale_good: Duration,
+    /// Process name reported by `/metrics`.
+    pub service_name: &'static str,
+    /// Service version reported by `/metrics` and `/health`.
+    pub service_version: &'static str,
 }

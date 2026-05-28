@@ -72,6 +72,10 @@ pub struct CliArgs {
     #[clap(long, default_value = "127.0.0.1:8080")]
     pub http_listen: String,
 
+    /// URL prefix for all HTTP endpoints (e.g. `/api`). Use `""` to serve at the root.
+    #[clap(long, default_value = "/api")]
+    pub api_prefix: String,
+
     /// Optional API key. When set, `POST /peers` requires it and `GET /peers` exposes `ip` only when the request matches.
     #[clap(long)]
     pub api_key: Option<String>,

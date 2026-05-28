@@ -21,7 +21,7 @@ use simply_kaspa_dnsseeder_crawler::{
 };
 use simply_kaspa_dnsseeder_dns::{DnsConfig, SeederHandler};
 use simply_kaspa_dnsseeder_store::PeerStore;
-use simply_kaspa_dnsseeder_web::{AppState, SchedulerProber, WebConfig, run_web_server};
+use simply_kaspa_dnsseeder_web::{AppState, MetricsSource, SchedulerProber, WebConfig, run_web_server};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::broadcast;
 
@@ -116,9 +116,18 @@ async fn run(cli: CliArgs) -> Result<()> {
         rate_limit_window: cli.rate_limit_window,
         network_default_port: network_id.default_p2p_port(),
         strict_port: cli.strict_port,
+        api_prefix: cli.api_prefix.clone(),
+        db_path: store_path.clone(),
+        stale_good: cli.stale_good,
+        service_name: "simply-kaspa-dnsseeder",
+        service_version: CliArgs::version(),
     };
     let prober = Arc::new(SchedulerProber::new(probe.clone(), store.clone()));
-    let state = AppState::with_metrics(store.clone(), prober, web_cfg, metrics.web.clone());
+    let metrics_source: Arc<dyn MetricsSource> = Arc::new(SubsystemMetrics {
+        crawler: metrics.crawler.clone(),
+        dns: metrics.dns.clone(),
+    });
+    let state = AppState::full(store.clone(), prober, web_cfg, metrics.web.clone(), metrics_source);
     let web_shutdown = shutdown_tx.subscribe();
     let web_task = tokio::spawn(async move {
         match run_web_server(state, web_shutdown).await {
@@ -191,4 +200,31 @@ fn spawn_signal_handler(shutdown: broadcast::Sender<()>) {
             sent.store(true, Ordering::Relaxed);
         }
     });
+}
+
+struct SubsystemMetrics {
+    crawler: Arc<simply_kaspa_dnsseeder_crawler::CrawlerMetrics>,
+    dns: Arc<simply_kaspa_dnsseeder_dns::DnsMetrics>,
+}
+
+impl MetricsSource for SubsystemMetrics {
+    fn extra(&self) -> serde_json::Value {
+        let c = self.crawler.snapshot();
+        let d = self.dns.snapshot();
+        serde_json::json!({
+            "crawler": {
+                "ok": c.ok,
+                "failed": c.failed,
+                "in_flight": c.in_flight,
+            },
+            "dns": {
+                "answered": d.answered,
+                "empty": d.empty,
+                "refused": d.refused,
+                "throttled": d.throttled,
+                "a": d.a,
+                "aaaa": d.aaaa,
+            },
+        })
+    }
 }

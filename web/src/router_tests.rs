@@ -51,6 +51,11 @@ fn make_state(prober: Arc<dyn Prober>, store: PeerStore, api_key: Option<String>
         rate_limit_window: Duration::from_secs(60),
         network_default_port: 16111,
         strict_port: false,
+        api_prefix: String::new(),
+        db_path: std::path::PathBuf::from("_test_unused.redb"),
+        stale_good: Duration::from_secs(900),
+        service_name: "test",
+        service_version: "0.0.0",
     };
     AppState::new(store, prober, cfg)
 }
@@ -227,6 +232,11 @@ async fn rate_limit_blocks_repeated_posts() {
         rate_limit_window: Duration::from_secs(60),
         network_default_port: 16111,
         strict_port: false,
+        api_prefix: String::new(),
+        db_path: std::path::PathBuf::from("_test_unused.redb"),
+        stale_good: Duration::from_secs(900),
+        service_name: "test",
+        service_version: "0.0.0",
     };
     let state = AppState::new(store, Arc::new(MockProber::default()), cfg);
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
