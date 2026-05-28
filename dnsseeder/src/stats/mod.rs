@@ -28,7 +28,6 @@ pub(super) struct MetricsReport {
 }
 
 impl MetricsReport {
-    /// Render the report into log-ready lines.
     pub(super) fn render(&self) -> Vec<String> {
         render(&self.block)
     }

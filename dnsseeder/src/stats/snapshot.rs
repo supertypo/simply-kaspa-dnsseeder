@@ -3,12 +3,12 @@
 //! Stored in the peer-store under a single key so totals survive restarts
 //! (modulo the last in-flight interval).
 //!
-//! Responsibilities are split into three layers:
-//! * [`MetricsSnapshot`] — the persisted shape (with `From`/projection helpers).
-//! * [`codec`] — pure bincode encode/decode.
-//! * [`io`] — store I/O wrapping `get_blob`/`put_blob`.
+//! Layered:
+//! * [`MetricsSnapshot`] — the persisted shape plus `build`/`restore_into` projection.
+//! * `codec` — pure bincode encode/decode.
+//! * `io` — store I/O via `get_blob`/`put_blob`.
 //!
-//! [`load`] and [`save`] are thin orchestration functions on top.
+//! [`load`] and [`save`] are thin orchestrators on top.
 
 use log::{debug, warn};
 use serde::{Deserialize, Serialize};

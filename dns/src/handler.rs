@@ -7,7 +7,7 @@ use hickory_proto::op::{Header, MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::rdata::{A, AAAA, NS, SOA};
 use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use hickory_server::authority::MessageResponseBuilder;
-use hickory_server::server::{Request, RequestHandler, ResponseHandler, ResponseInfo};
+use hickory_server::server::{Request, RequestHandler, RequestInfo, ResponseHandler, ResponseInfo};
 use log::{debug, trace, warn};
 use rand::seq::SliceRandom;
 use simply_kaspa_dnsseeder_common::{RateLimiter, duration_to_ms, now_ms};
@@ -30,7 +30,7 @@ struct QueryPlan {
     qname: Name,
 }
 
-/// Fully assembled DNS answer (response sections, no header yet).
+/// DNS response sections, ready to be wrapped in a header and sent.
 struct Answer {
     answers: Vec<Record>,
     ns: Vec<Record>,
@@ -92,9 +92,8 @@ impl SeederHandler {
         }
     }
 
-    /// Phase 1 validation: well-formed query at the protocol layer.
-    /// On refusal logs+records metrics and returns `Err(())`.
-    fn parse_basic<'a>(&self, request: &'a Request) -> Result<hickory_server::server::RequestInfo<'a>, ()> {
+    /// Protocol-layer query validation. Records `refused` metrics on failure.
+    fn parse_basic<'a>(&self, request: &'a Request) -> Result<RequestInfo<'a>, ()> {
         if request.message_type() != MessageType::Query || request.op_code() != OpCode::Query {
             trace!(
                 "dns: rejecting non-query from {}: type={:?} op={:?}",
@@ -105,17 +104,13 @@ impl SeederHandler {
             self.metrics.record_refused();
             return Err(());
         }
-        if let Ok(info) = request.request_info() {
-            Ok(info)
-        } else {
+        request.request_info().map_err(|_| {
             self.metrics.record_refused();
-            Err(())
-        }
+        })
     }
 
-    /// Phase 2 validation: query content matches what this zone serves.
-    /// Returns the answer plan or `Err(())` on refusal (logs + metrics handled).
-    fn classify(&self, info: &hickory_server::server::RequestInfo<'_>, src: std::net::SocketAddr) -> Result<QueryPlan, ()> {
+    /// Content validation: class/type/name match what this zone serves.
+    fn classify(&self, info: &RequestInfo<'_>, src: std::net::SocketAddr) -> Result<QueryPlan, ()> {
         let qclass = info.query.query_class();
         if qclass != DNSClass::IN {
             trace!("dns: refusing non-IN class {qclass:?} from {src}");
@@ -136,7 +131,7 @@ impl SeederHandler {
         Ok(QueryPlan { qtype, qname })
     }
 
-    /// Assemble the full DNS answer (answers + NS/SOA sections) for a validated plan.
+    /// Assemble response sections (answers + authority NS + SOA) for a validated plan.
     fn build_answer(&self, qtype: RecordType) -> Answer {
         let answers = self.build_answers(qtype);
         let soa = if answers.is_empty() && qtype != RecordType::SOA {
