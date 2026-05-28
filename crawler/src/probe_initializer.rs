@@ -20,6 +20,9 @@ use crate::model::ProbeResult;
 
 const MAX_ADDRESSES_RECEIVE: usize = 2500;
 const USER_AGENT: &str = "/simply-kaspa-dnsseeder:0.1.0/";
+/// Gap between back-to-back `RequestAddresses` rounds in a single probe.
+/// Matches the legacy Go seeder so peers see the same cadence.
+const PROBE_REPEAT_DELAY: Duration = Duration::from_millis(250);
 
 pub(crate) type ProbeChannel = oneshot::Sender<Result<ProbeResult, ProbeError>>;
 pub(crate) type PendingMap = Arc<DashMap<std::net::SocketAddr, ProbeChannel>>;
@@ -28,12 +31,18 @@ pub(crate) type PendingMap = Arc<DashMap<std::net::SocketAddr, ProbeChannel>>;
 pub struct ProbeInitializerConfig {
     pub network_id: kaspa_consensus_core::network::NetworkId,
     pub probe_timeout: Duration,
+    /// Number of back-to-back `RequestAddresses` rounds per probe (1..=10).
+    pub probes_per_peer: u8,
 }
 
 impl ProbeInitializerConfig {
     #[must_use]
-    pub fn new(network_id: kaspa_consensus_core::network::NetworkId, probe_timeout: Duration) -> Self {
-        Self { network_id, probe_timeout }
+    pub fn new(network_id: kaspa_consensus_core::network::NetworkId, probe_timeout: Duration, probes_per_peer: u8) -> Self {
+        Self {
+            network_id,
+            probe_timeout,
+            probes_per_peer,
+        }
     }
 }
 
@@ -109,24 +118,7 @@ impl ProbeInitializer {
             .enqueue(make_message!(Payload::Addresses, pb::AddressesMessage { address_list: vec![] }))
             .await?;
 
-        router
-            .enqueue(make_message!(
-                Payload::RequestAddresses,
-                RequestAddressesMessage {
-                    include_all_subnetworks: true,
-                    subnetwork_id: None
-                }
-            ))
-            .await?;
-
-        let msg: AddressesMessage = dequeue_with_timeout!(addresses_route, Payload::Addresses, timeout)?;
-        let address_list: Vec<(IpAddress, u16)> = msg.try_into()?;
-        if address_list.len() > MAX_ADDRESSES_RECEIVE {
-            return Err(ProtocolError::OtherOwned(format!(
-                "address count {} exceeded {MAX_ADDRESSES_RECEIVE}",
-                address_list.len(),
-            )));
-        }
+        let address_list = self.collect_addresses(router, &mut addresses_route, timeout).await?;
         info!(
             "crawler: probe {}: received {} address(es)",
             router.net_address(),
@@ -159,6 +151,58 @@ impl ProbeInitializer {
             version: peer_version,
             addresses: address_list,
         })
+    }
+    /// Issue `probes_per_peer` rounds of `RequestAddresses`, merging unique
+    /// `(ip, port)` pairs across rounds. After the first successful batch,
+    /// transport errors / timeouts short-circuit the loop and return what we
+    /// already have — matching the Go seeder's resilient collection behavior.
+    async fn collect_addresses(
+        &self,
+        router: &Arc<Router>,
+        addresses_route: &mut IncomingRoute,
+        timeout: Duration,
+    ) -> Result<Vec<(IpAddress, u16)>, ProtocolError> {
+        let rounds = self.config.probes_per_peer.max(1);
+        let mut address_set: std::collections::HashSet<(IpAddress, u16)> = std::collections::HashSet::new();
+        for round in 0..rounds {
+            if round > 0 {
+                tokio::time::sleep(PROBE_REPEAT_DELAY).await;
+            }
+            if let Err(err) = router
+                .enqueue(make_message!(
+                    Payload::RequestAddresses,
+                    RequestAddressesMessage {
+                        include_all_subnetworks: true,
+                        subnetwork_id: None
+                    }
+                ))
+                .await
+            {
+                if !address_set.is_empty() {
+                    break;
+                }
+                return Err(err);
+            }
+            let recv: Result<AddressesMessage, ProtocolError> = dequeue_with_timeout!(addresses_route, Payload::Addresses, timeout);
+            let msg = match recv {
+                Ok(m) => m,
+                Err(err) => {
+                    if !address_set.is_empty() {
+                        break;
+                    }
+                    return Err(err);
+                }
+            };
+            let batch: Vec<(IpAddress, u16)> = msg.try_into()?;
+            address_set.extend(batch);
+            if address_set.len() > MAX_ADDRESSES_RECEIVE {
+                return Err(ProtocolError::OtherOwned(format!(
+                    "address count {} exceeded {MAX_ADDRESSES_RECEIVE}",
+                    address_set.len(),
+                )));
+            }
+        }
+        Ok(address_set.into_iter().collect())
     }
 }
 

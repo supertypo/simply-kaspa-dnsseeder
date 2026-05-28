@@ -18,6 +18,7 @@ fn parses_required_network_id() {
 fn defaults_match_spec() {
     let cli = parse(&["--network-id", "kaspa-mainnet"]);
     assert_eq!(cli.crawler.threads, 8);
+    assert_eq!(cli.crawler.probes_per_peer, 3);
     assert_eq!(cli.crawler.probe_timeout, Duration::from_secs(8));
     assert_eq!(cli.crawler.probe_tick, Duration::from_secs(10));
     assert_eq!(cli.crawler.stale_good, Duration::from_secs(30 * 60));
@@ -44,6 +45,24 @@ fn defaults_match_spec() {
 fn threads_zero_rejected() {
     let res = CliArgs::try_parse_from(["simply-kaspa-dnsseeder", "--network-id", "kaspa-mainnet", "--threads", "0"]);
     assert!(res.is_err(), "--threads 0 must be rejected");
+}
+
+#[test]
+fn probes_per_peer_defaults_to_three() {
+    let cli = parse(&["--network-id", "kaspa-mainnet"]);
+    assert_eq!(cli.crawler.probes_per_peer, 3);
+}
+
+#[test]
+fn probes_per_peer_bounds_enforced() {
+    for bad in ["0", "11", "100"] {
+        let res = CliArgs::try_parse_from(["simply-kaspa-dnsseeder", "--network-id", "kaspa-mainnet", "--probes-per-peer", bad]);
+        assert!(res.is_err(), "--probes-per-peer {bad} must be rejected");
+    }
+    for good in ["1", "5", "10"] {
+        let cli = parse(&["--network-id", "kaspa-mainnet", "--probes-per-peer", good]);
+        assert_eq!(cli.crawler.probes_per_peer, good.parse::<u8>().unwrap());
+    }
 }
 
 #[test]

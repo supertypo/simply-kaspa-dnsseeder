@@ -53,7 +53,10 @@ pub(super) struct WebSnap {
 impl MetricsSnapshot {
     fn build(crawler: &CrawlerSnapshot, dns: &DnsSnapshot, web: &WebSnapshot, now_ms: i64) -> Self {
         Self {
-            crawler: CrawlerSnap { ok: crawler.ok, failed: crawler.failed },
+            crawler: CrawlerSnap {
+                ok: crawler.ok,
+                failed: crawler.failed,
+            },
             dns: DnsSnap {
                 answered: dns.answered,
                 empty: dns.empty,
@@ -62,13 +65,21 @@ impl MetricsSnapshot {
                 a: dns.a,
                 aaaa: dns.aaaa,
             },
-            web: WebSnap { requests: web.requests, accepted: web.accepted, rejected: web.rejected },
+            web: WebSnap {
+                requests: web.requests,
+                accepted: web.accepted,
+                rejected: web.rejected,
+            },
             persisted_at_ms: now_ms,
         }
     }
 
     fn restore_into(&self, crawler: &CrawlerMetrics, dns: &DnsMetrics, web: &WebMetrics) {
-        crawler.restore(&CrawlerSnapshot { ok: self.crawler.ok, failed: self.crawler.failed, in_flight: 0 });
+        crawler.restore(&CrawlerSnapshot {
+            ok: self.crawler.ok,
+            failed: self.crawler.failed,
+            in_flight: 0,
+        });
         dns.restore(&DnsSnapshot {
             answered: self.dns.answered,
             empty: self.dns.empty,
@@ -77,7 +88,11 @@ impl MetricsSnapshot {
             a: self.dns.a,
             aaaa: self.dns.aaaa,
         });
-        web.restore(&WebSnapshot { requests: self.web.requests, accepted: self.web.accepted, rejected: self.web.rejected });
+        web.restore(&WebSnapshot {
+            requests: self.web.requests,
+            accepted: self.web.accepted,
+            rejected: self.web.rejected,
+        });
     }
 }
 

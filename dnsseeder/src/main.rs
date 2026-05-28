@@ -54,7 +54,7 @@ async fn run(cli: CliArgs) -> Result<()> {
     let metrics = Metrics::new(network_id, CliArgs::version(), cli.crawler.stale_good);
     metrics.load_from(&store);
 
-    let probe_cfg = ProbeInitializerConfig::new(network_id, cli.crawler.probe_timeout);
+    let probe_cfg = ProbeInitializerConfig::new(network_id, cli.crawler.probe_timeout, cli.crawler.probes_per_peer);
     let probe = Arc::new(KaspadProbe::new(probe_cfg));
 
     let scheduler_cfg = SchedulerConfig {

@@ -67,7 +67,13 @@ pub struct AppStateBuilder {
 
 impl AppStateBuilder {
     fn new(store: PeerStore, prober: Arc<dyn Prober>, config: WebConfig) -> Self {
-        Self { store, prober, config, metrics: None, metrics_source: None }
+        Self {
+            store,
+            prober,
+            config,
+            metrics: None,
+            metrics_source: None,
+        }
     }
 
     #[must_use]
@@ -86,7 +92,10 @@ impl AppStateBuilder {
     pub fn build(self) -> AppState {
         let limiter = Arc::new(RateLimiter::new(self.config.post_rate_limit, self.config.rate_limit_window));
         AppState {
-            runtime: RuntimeRefs { store: self.store, prober: self.prober },
+            runtime: RuntimeRefs {
+                store: self.store,
+                prober: self.prober,
+            },
             obs: ObservabilityCtx {
                 metrics: self.metrics.unwrap_or_else(|| Arc::new(WebMetrics::new())),
                 metrics_source: self.metrics_source.unwrap_or_else(|| Arc::new(NullMetricsSource)),

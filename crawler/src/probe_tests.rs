@@ -22,7 +22,7 @@ async fn black_hole_listener() -> SocketAddr {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn timeout_returns_within_budget_and_cleans_pending() {
-    let cfg = ProbeInitializerConfig::new(NetworkId::new(NetworkType::Mainnet), Duration::from_millis(300));
+    let cfg = ProbeInitializerConfig::new(NetworkId::new(NetworkType::Mainnet), Duration::from_millis(300), 1);
     let probe = KaspadProbe::new(cfg);
     let addr = black_hole_listener().await;
 
@@ -44,7 +44,7 @@ async fn connection_refused_cleans_pending() {
     let addr = listener.local_addr().unwrap();
     drop(listener);
 
-    let cfg = ProbeInitializerConfig::new(NetworkId::new(NetworkType::Mainnet), Duration::from_secs(2));
+    let cfg = ProbeInitializerConfig::new(NetworkId::new(NetworkType::Mainnet), Duration::from_secs(2), 1);
     let probe = KaspadProbe::new(cfg);
 
     let res = probe.probe(addr).await;
