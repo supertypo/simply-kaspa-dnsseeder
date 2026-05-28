@@ -34,7 +34,7 @@ impl DnsConfig {
             queries_per_ip_per_second: 1,
             rate_limit_window: Duration::from_secs(5),
             tcp_idle_timeout: Duration::from_secs(5),
-            stale_good: Duration::from_secs(15 * 60),
+            stale_good: Duration::from_mins(15),
             min_protocol_version: None,
             min_user_agent: None,
         }

@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 
 use crate::config::DnsConfig;
 
-pub const REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+pub const REFRESH_INTERVAL: Duration = Duration::from_mins(1);
 pub const SNAPSHOT_MULTIPLIER: usize = 10;
 
 /// Pre-filtered set of currently-serving peer IPs, split by family. Each slice

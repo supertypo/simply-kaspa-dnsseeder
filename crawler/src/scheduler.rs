@@ -31,7 +31,7 @@ use crate::worker_pool::{EnqueueOutcome, WorkerCtx, WorkerPool};
 use simply_kaspa_dnsseeder_common::{duration_to_ms, now_ms};
 
 /// Pruning runs on this fixed cadence (matches Go dnsseeder).
-const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
+const PRUNE_INTERVAL: Duration = Duration::from_mins(1);
 /// Per-host timeout for `--seeder` lookups. Mirrors the built-in DNS-seeder
 /// timeout so a single dead host can't stall bootstrap indefinitely.
 const SEEDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);

@@ -36,7 +36,7 @@ pub(crate) async fn collect_process(system: &RwLock<System>) -> Value {
 }
 
 pub(crate) fn collect_disk(db_path: &Path) -> Value {
-    let db_size_bytes = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
+    let db_size_bytes = std::fs::metadata(db_path).map_or(0, |m| m.len());
     let disks = Disks::new_with_refreshed_list();
     let canonical = std::fs::canonicalize(db_path).unwrap_or_else(|err| {
         debug!(
