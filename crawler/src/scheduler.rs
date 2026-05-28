@@ -106,12 +106,7 @@ impl ProbeTaskCtx {
 
 impl Scheduler {
     #[must_use]
-    pub fn new(config: SchedulerConfig, store: PeerStore, probe: Arc<dyn Probe>, resolver: Arc<dyn Resolver>) -> Self {
-        Self::with_metrics(config, store, probe, resolver, Arc::new(CrawlerMetrics::new()))
-    }
-
-    #[must_use]
-    pub fn with_metrics(
+    pub fn new(
         config: SchedulerConfig,
         store: PeerStore,
         probe: Arc<dyn Probe>,

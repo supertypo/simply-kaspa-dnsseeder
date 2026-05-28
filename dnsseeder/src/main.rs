@@ -68,7 +68,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         strict_port: cli.strict_port,
     };
     let resolver = Arc::new(TokioResolver);
-    let scheduler = Scheduler::with_metrics(scheduler_cfg, store.clone(), probe.clone(), resolver, metrics.crawler.clone());
+    let scheduler = Scheduler::new(scheduler_cfg, store.clone(), probe.clone(), resolver, metrics.crawler.clone());
 
     let scheduler_shutdown = shutdown_tx.subscribe();
     let scheduler_task = tokio::spawn(async move {
