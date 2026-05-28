@@ -2,6 +2,7 @@
 //! together. Logging, signal handling and a graceful shutdown broadcast
 //! are managed here; everything domain-specific lives in the library crates.
 
+mod metrics_source;
 mod stats;
 
 use std::net::SocketAddr;
@@ -25,6 +26,7 @@ use simply_kaspa_dnsseeder_web::{AppState, MetricsSource, SchedulerProber, WebCo
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::broadcast;
 
+use crate::metrics_source::SubsystemMetrics;
 use crate::stats::{Metrics, stats_loop};
 
 #[tokio::main]
@@ -202,29 +204,4 @@ fn spawn_signal_handler(shutdown: broadcast::Sender<()>) {
     });
 }
 
-struct SubsystemMetrics {
-    crawler: Arc<simply_kaspa_dnsseeder_crawler::CrawlerMetrics>,
-    dns: Arc<simply_kaspa_dnsseeder_dns::DnsMetrics>,
-}
 
-impl MetricsSource for SubsystemMetrics {
-    fn extra(&self) -> serde_json::Value {
-        let c = self.crawler.snapshot();
-        let d = self.dns.snapshot();
-        serde_json::json!({
-            "crawler": {
-                "ok": c.ok,
-                "failed": c.failed,
-                "in_flight": c.in_flight,
-            },
-            "dns": {
-                "answered": d.answered,
-                "empty": d.empty,
-                "refused": d.refused,
-                "throttled": d.throttled,
-                "a": d.a,
-                "aaaa": d.aaaa,
-            },
-        })
-    }
-}
