@@ -291,7 +291,7 @@ async fn rate_limit_blocks_repeated_posts() {
 }
 
 #[tokio::test]
-async fn get_peer_includes_default_port_true() {
+async fn get_peer_returns_port() {
     let (_temp, store) = seeded_store();
     let state = make_state(Arc::new(MockProber::default()), store, None);
     let app = build_router(state);
@@ -301,7 +301,6 @@ async fn get_peer_includes_default_port_true() {
         .unwrap();
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["defaultPort"], true);
     assert_eq!(json["port"], 16111);
 }
 
@@ -319,7 +318,6 @@ async fn list_peers_uses_camel_case_keys() {
         "userAgent",
         "lastSeenMs",
         "firstSeenMs",
-        "defaultPort",
         "ip",
         "port",
     ] {

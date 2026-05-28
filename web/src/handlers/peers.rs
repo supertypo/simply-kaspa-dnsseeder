@@ -71,8 +71,7 @@ pub(crate) async fn list(
         records.truncate(MAX_LIST_RESPONSE);
     }
     let expose = expose_ip(&headers, state.config.api_key.as_deref());
-    let default_port = state.config.network_default_port;
-    let dtos: Vec<PeerDto> = records.iter().map(|r| PeerDto::from_record(r, expose, default_port)).collect();
+    let dtos: Vec<PeerDto> = records.iter().map(|r| PeerDto::from_record(r, expose)).collect();
     Json(dtos).into_response()
 }
 
@@ -94,7 +93,7 @@ pub(crate) async fn get(
     match state.store.get(&net) {
         Ok(Some(rec)) if filter.matches(&rec) => {
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
-            Json(PeerDto::from_record(&rec, expose, state.config.network_default_port)).into_response()
+            Json(PeerDto::from_record(&rec, expose)).into_response()
         }
         Ok(_) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
         Err(err) => {
@@ -159,7 +158,7 @@ pub(crate) async fn submit(
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
             (
                 StatusCode::OK,
-                Json(PeerDto::from_record(&rec, expose, state.config.network_default_port)),
+                Json(PeerDto::from_record(&rec, expose)),
             )
                 .into_response()
         }

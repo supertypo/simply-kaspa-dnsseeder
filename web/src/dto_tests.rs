@@ -1,11 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use serde_json::Value;
-use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord};
+use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, UNKNOWN_PEER_ID};
 
 use crate::dto::PeerDto;
-
-const DEFAULT_PORT: u16 = 16111;
 
 fn rec_with_ua(ua: &str) -> PeerRecord {
     PeerRecord {
@@ -28,7 +26,7 @@ fn rec_with_ua(ua: &str) -> PeerRecord {
 #[test]
 fn public_view_exposes_only_anonymous_fields() {
     let rec = rec_with_ua("/kaspad:1.1.0/");
-    let dto = PeerDto::from_record(&rec, false, DEFAULT_PORT);
+    let dto = PeerDto::from_record(&rec, false);
     let json: Value = serde_json::to_value(&dto).unwrap();
     let obj = json.as_object().expect("object");
 
@@ -38,7 +36,6 @@ fn public_view_exposes_only_anonymous_fields() {
         "userAgent",
         "kaspadVersion",
         "port",
-        "defaultPort",
         "lastSeenMs",
         "lastSeen",
     ]
@@ -47,13 +44,12 @@ fn public_view_exposes_only_anonymous_fields() {
     assert_eq!(keys, expected);
     assert_eq!(obj["port"], 16111);
     assert_eq!(obj["protocolVersion"], 7);
-    assert_eq!(obj["defaultPort"], true);
 }
 
 #[test]
 fn full_view_exposes_all_fields() {
     let rec = rec_with_ua("/kaspad:1.1.0/");
-    let dto = PeerDto::from_record(&rec, true, DEFAULT_PORT);
+    let dto = PeerDto::from_record(&rec, true);
     let json: Value = serde_json::to_value(&dto).unwrap();
     let obj = json.as_object().expect("object");
 
@@ -64,7 +60,6 @@ fn full_view_exposes_all_fields() {
         "kaspadVersion",
         "ip",
         "port",
-        "defaultPort",
         "firstSeenMs",
         "lastSeenMs",
         "lastAttemptMs",
@@ -78,22 +73,12 @@ fn full_view_exposes_all_fields() {
     }
     assert_eq!(obj["ip"], "1.2.3.4");
     assert_eq!(obj["id"], "11111111111111111111111111111111");
-    assert_eq!(obj["defaultPort"], true);
-}
-
-#[test]
-fn default_port_is_false_when_port_differs() {
-    let mut rec = rec_with_ua("/kaspad:1.1.0/");
-    rec.address.port = 16112;
-    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true, DEFAULT_PORT)).unwrap();
-    assert_eq!(json["defaultPort"], false);
-    assert_eq!(json["port"], 16112);
 }
 
 #[test]
 fn iso_timestamps_use_seconds_precision_with_z_suffix() {
     let rec = rec_with_ua("/kaspad:1.1.0/");
-    let dto = PeerDto::from_record(&rec, true, DEFAULT_PORT);
+    let dto = PeerDto::from_record(&rec, true);
     let json: Value = serde_json::to_value(&dto).unwrap();
     for field in ["firstSeen", "lastSeen", "lastAttempt", "lastSuccess"] {
         let s = json[field].as_str().unwrap();
@@ -106,13 +91,44 @@ fn iso_timestamps_use_seconds_precision_with_z_suffix() {
 #[test]
 fn kaspad_version_preserves_prerelease_suffix() {
     let rec = rec_with_ua("/kaspad:1.2.1-toc.3/");
-    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, false, DEFAULT_PORT)).unwrap();
+    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, false)).unwrap();
     assert_eq!(json["kaspadVersion"], "1.2.1-toc.3");
 }
 
 #[test]
 fn kaspad_version_is_null_when_unparseable() {
     let rec = rec_with_ua("/something-else/");
-    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true, DEFAULT_PORT)).unwrap();
+    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true)).unwrap();
+    assert_eq!(json["kaspadVersion"], Value::Null);
+}
+
+#[test]
+fn stub_record_serializes_unknown_fields_as_null() {
+    let mut rec = rec_with_ua("");
+    rec.id = UNKNOWN_PEER_ID;
+    rec.protocol_version = 0;
+    rec.last_attempt_ms = 0;
+    rec.last_success_ms = 0;
+
+    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true)).unwrap();
+    assert_eq!(json["id"], Value::Null);
+    assert_eq!(json["protocolVersion"], Value::Null);
+    assert_eq!(json["userAgent"], Value::Null);
+    assert_eq!(json["lastAttemptMs"], Value::Null);
+    assert_eq!(json["lastSuccessMs"], Value::Null);
+    assert_eq!(json["lastAttempt"], Value::Null);
+    assert_eq!(json["lastSuccess"], Value::Null);
+    // Fields that are always set on insert remain populated.
+    assert!(json["firstSeenMs"].is_number());
+    assert!(json["lastSeenMs"].is_number());
+}
+
+#[test]
+fn public_view_nullifies_empty_user_agent_and_zero_protocol() {
+    let mut rec = rec_with_ua("");
+    rec.protocol_version = 0;
+    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, false)).unwrap();
+    assert_eq!(json["userAgent"], Value::Null);
+    assert_eq!(json["protocolVersion"], Value::Null);
     assert_eq!(json["kaspadVersion"], Value::Null);
 }
