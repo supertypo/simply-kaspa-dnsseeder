@@ -10,6 +10,7 @@
 pub mod config;
 pub mod error;
 pub mod handler;
+pub mod metrics;
 pub mod rate_limit;
 pub mod server;
 
@@ -21,4 +22,5 @@ mod rate_limit_tests;
 pub use config::DnsConfig;
 pub use error::Error;
 pub use handler::SeederHandler;
-pub use server::run_dns_server;
+pub use metrics::{DnsMetrics, DnsSnapshot};
+pub use server::{run_dns_server, run_dns_server_with_handler};

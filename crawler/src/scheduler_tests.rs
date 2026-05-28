@@ -177,7 +177,7 @@ mod probe_one_fanout {
         let (_d, store) = open_store();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
 
-        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false, None).await;
 
         // Source got upserted as a full record (probe succeeded), plus two stubs.
         assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().is_some());
@@ -190,7 +190,7 @@ mod probe_one_fanout {
         let (_d, store) = open_store();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
 
-        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false, None).await;
 
         assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4)), DEFAULT_PORT)).unwrap().is_some());
     }
@@ -210,7 +210,7 @@ mod probe_one_fanout {
         let (_d, store) = open_store();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
 
-        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false, None).await;
 
         assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), 16111)).unwrap().is_none());
         assert!(store.get(&net(IpAddr::V4(Ipv4Addr::LOCALHOST), 16111)).unwrap().is_none());
@@ -231,7 +231,7 @@ mod probe_one_fanout {
         let (_d, store) = open_store();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
 
-        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false, None).await;
 
         let rec = store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().unwrap();
         // Stub: last_attempt should be 0 (we haven't probed it yet — discovery only).
@@ -249,7 +249,7 @@ mod probe_one_fanout {
         let pre = store.get(&addr).unwrap().unwrap();
 
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
-        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false, None).await;
 
         let post = store.get(&addr).unwrap().unwrap();
         assert_eq!(pre, post, "discovery must not touch an existing record");
@@ -261,7 +261,7 @@ mod probe_one_fanout {
         let (_d, store) = open_store();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
 
-        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false).await;
+        Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false, None).await;
 
         assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().is_some());
     }

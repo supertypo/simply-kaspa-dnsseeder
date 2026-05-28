@@ -13,6 +13,7 @@ use rand::seq::SliceRandom;
 use simply_kaspa_dnsseeder_store::{Family, Filter, PeerStore};
 
 use crate::config::DnsConfig;
+use crate::metrics::DnsMetrics;
 use crate::rate_limit::RateLimiter;
 
 // musl-libc treats empty AAAA as a hard failure and refuses A fallback;
@@ -31,16 +32,30 @@ pub struct SeederHandler {
     hostmaster: Name,
     p2p_port: u16,
     rate_limit: Arc<RateLimiter>,
+    metrics: Arc<DnsMetrics>,
 }
 
 impl SeederHandler {
     pub fn new(config: DnsConfig, store: PeerStore) -> Result<Self, hickory_proto::ProtoError> {
+        Self::with_metrics(config, store, Arc::new(DnsMetrics::new()))
+    }
+
+    pub fn with_metrics(
+        config: DnsConfig,
+        store: PeerStore,
+        metrics: Arc<DnsMetrics>,
+    ) -> Result<Self, hickory_proto::ProtoError> {
         let apex = fqdn(&config.dns_zone)?;
         let nameserver = fqdn(&config.nameserver)?;
         let hostmaster = Name::from_str("hostmaster.")?.append_domain(&apex)?;
         let p2p_port = config.network_id.default_p2p_port();
         let rate_limit = Arc::new(RateLimiter::new(config.queries_per_ip_per_second, config.rate_limit_window));
-        Ok(Self { config: Arc::new(config), store, apex, nameserver, hostmaster, p2p_port, rate_limit })
+        Ok(Self { config: Arc::new(config), store, apex, nameserver, hostmaster, p2p_port, rate_limit, metrics })
+    }
+
+    #[must_use]
+    pub fn metrics(&self) -> Arc<DnsMetrics> {
+        self.metrics.clone()
     }
 
     fn build_answers(&self, qtype: RecordType) -> Vec<Record> {
@@ -122,37 +137,44 @@ impl RequestHandler for SeederHandler {
 
         if request.message_type() != MessageType::Query || request.op_code() != OpCode::Query {
             trace!("dns: rejecting non-query from {src}: type={:?} op={:?}", request.message_type(), request.op_code());
+            self.metrics.record_refused();
             return refuse(request, response_handle).await;
         }
 
         let Ok(info) = request.request_info() else {
+            self.metrics.record_refused();
             return refuse(request, response_handle).await;
         };
 
         // Silent drop: emit no bytes so the seeder offers zero amplification.
         if !self.rate_limit.check(src.ip()) {
             debug!("dns: rate-limited query from {}", src.ip());
+            self.metrics.record_throttled();
             return no_response();
         }
 
         let qclass = info.query.query_class();
         if qclass != DNSClass::IN {
             trace!("dns: refusing non-IN class {qclass:?} from {src}");
+            self.metrics.record_refused();
             return refuse(request, response_handle).await;
         }
 
         let qtype = info.query.query_type();
         if !is_allowed_type(qtype) {
             trace!("dns: refusing type {qtype:?} from {src}");
+            self.metrics.record_refused();
             return refuse(request, response_handle).await;
         }
 
         let qname: Name = info.query.name().into();
         if qname != self.apex {
+            self.metrics.record_refused();
             return refuse(request, response_handle).await;
         }
 
         let answers = self.build_answers(qtype);
+        self.metrics.record_answered(qtype == RecordType::A, qtype == RecordType::AAAA, answers.len());
         debug!("dns: answered {qtype:?} for {qname} from {src} with {} record(s)", answers.len());
         let mut header = Header::response_from_request(request.header());
         header.set_authoritative(true);

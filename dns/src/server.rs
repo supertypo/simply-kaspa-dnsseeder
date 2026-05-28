@@ -10,12 +10,20 @@ use crate::handler::SeederHandler;
 pub async fn run_dns_server(
     config: DnsConfig,
     store: PeerStore,
-    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+    shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> Result<(), Error> {
     let listen = config.dns_listen;
     let tcp_idle = config.tcp_idle_timeout;
     let handler = SeederHandler::new(config, store)?;
+    run_dns_server_with_handler(handler, listen, tcp_idle, shutdown).await
+}
 
+pub async fn run_dns_server_with_handler(
+    handler: SeederHandler,
+    listen: std::net::SocketAddr,
+    tcp_idle: std::time::Duration,
+    mut shutdown: tokio::sync::broadcast::Receiver<()>,
+) -> Result<(), Error> {
     let mut server = ServerFuture::new(handler);
     let udp = UdpSocket::bind(listen).await?;
     info!("dns: udp listening on {listen}");

@@ -24,6 +24,7 @@ use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 use tokio::sync::{Semaphore, broadcast};
 
 use crate::error::Error;
+use crate::metrics::CrawlerMetrics;
 use crate::model::{ProbeResult, canonicalize_ip, is_acceptable_address, now_ms, peer_record_from_version};
 use crate::probe::Probe;
 use crate::seeders::{Resolver, dns_seed_many};
@@ -72,13 +73,30 @@ pub struct Scheduler {
     resolver: Arc<dyn Resolver>,
     in_flight: Arc<DashSet<SocketAddr>>,
     semaphore: Arc<Semaphore>,
+    metrics: Arc<CrawlerMetrics>,
 }
 
 impl Scheduler {
     #[must_use]
     pub fn new(config: SchedulerConfig, store: PeerStore, probe: Arc<dyn Probe>, resolver: Arc<dyn Resolver>) -> Self {
+        Self::with_metrics(config, store, probe, resolver, Arc::new(CrawlerMetrics::new()))
+    }
+
+    #[must_use]
+    pub fn with_metrics(
+        config: SchedulerConfig,
+        store: PeerStore,
+        probe: Arc<dyn Probe>,
+        resolver: Arc<dyn Resolver>,
+        metrics: Arc<CrawlerMetrics>,
+    ) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.threads.max(1)));
-        Self { config, store, probe, resolver, in_flight: Arc::new(DashSet::new()), semaphore }
+        Self { config, store, probe, resolver, in_flight: Arc::new(DashSet::new()), semaphore, metrics }
+    }
+
+    #[must_use]
+    pub fn metrics(&self) -> Arc<CrawlerMetrics> {
+        self.metrics.clone()
     }
 
     /// Run the scheduler. Returns when `shutdown` fires.
@@ -212,13 +230,16 @@ impl Scheduler {
             let store = self.store.clone();
             let in_flight = self.in_flight.clone();
             let semaphore = self.semaphore.clone();
+            let metrics = self.metrics.clone();
             // Acquire the permit inside the task so the dispatch loop stays responsive to shutdown.
             tokio::spawn(async move {
                 let Ok(_permit) = semaphore.acquire_owned().await else {
                     in_flight.remove(&addr);
                     return;
                 };
-                Self::probe_one(probe.as_ref(), &store, addr, default_port, strict_port).await;
+                metrics.in_flight_inc();
+                Self::probe_one(probe.as_ref(), &store, addr, default_port, strict_port, Some(&metrics)).await;
+                metrics.in_flight_dec();
                 in_flight.remove(&addr);
             });
         }
@@ -237,9 +258,13 @@ impl Scheduler {
         addr: SocketAddr,
         default_port: u16,
         strict_port: bool,
+        metrics: Option<&CrawlerMetrics>,
     ) {
         match probe.probe(addr).await {
             Ok(result) => {
+                if let Some(m) = metrics {
+                    m.record_ok();
+                }
                 debug!(
                     "crawler: probe {addr} succeeded (protocol={}, ua={:?})",
                     result.version.protocol_version, result.version.user_agent
@@ -269,6 +294,9 @@ impl Scheduler {
                 }
             }
             Err(err) => {
+                if let Some(m) = metrics {
+                    m.record_failed();
+                }
                 debug!("crawler: probe {addr} failed: {err}");
                 // `last_attempt` was already bumped by enqueue_probes before dispatch.
             }

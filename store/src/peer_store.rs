@@ -3,6 +3,7 @@ use crate::filter::Filter;
 use crate::record::{NetAddress, PeerRecord};
 use log::{debug, warn};
 use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};
+use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -11,6 +12,21 @@ use std::sync::Arc;
 /// The `_v2` suffix distinguishes this from the prior id-keyed schema; opening an
 /// old database simply ignores the legacy `peers` table and starts fresh.
 const PEERS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("peers_v2");
+
+/// Generic key/value table used for small persisted blobs (e.g. metrics snapshots).
+const KV: TableDefinition<&str, &[u8]> = TableDefinition::new("kv_v1");
+
+/// Read-only snapshot of aggregate store state, computed by [`PeerStore::summary`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StoreSummary {
+    pub total: u64,
+    pub good: u64,
+    pub failed: u64,
+    pub v4: u64,
+    pub v6: u64,
+    /// Average age in ms of `last_success_ms` across the `good` subset. Zero when `good == 0`.
+    pub avg_success_age_ms: u64,
+}
 
 /// Sentinel id used for records created before a successful handshake.
 pub const UNKNOWN_PEER_ID: [u8; 16] = [0u8; 16];
@@ -32,6 +48,7 @@ impl PeerStore {
         let txn = db.begin_write()?;
         {
             let _ = txn.open_table(PEERS)?;
+            let _ = txn.open_table(KV)?;
         }
         txn.commit()?;
         let store = Self { db: Arc::new(db) };
@@ -254,6 +271,59 @@ impl PeerStore {
         txn.commit()?;
         debug!("store: pruned {} dead peers", to_delete.len());
         Ok(to_delete.len())
+    }
+
+    /// Compute an aggregate summary of all stored peers in a single read pass.
+    /// A peer is "good" iff `last_success_ms > 0` and `now_ms - last_success_ms <= stale_good_ms`.
+    pub fn summary(&self, now_ms: i64, stale_good_ms: i64) -> Result<StoreSummary, Error> {
+        let mut s = StoreSummary::default();
+        let mut sum_age_ms: u128 = 0;
+        let txn = self.db.begin_read()?;
+        let t = txn.open_table(PEERS)?;
+        for entry in t.iter()? {
+            let (_, v) = entry?;
+            let Ok(rec) = decode_record(v.value()) else { continue };
+            s.total += 1;
+            match rec.address.ip {
+                IpAddr::V4(_) => s.v4 += 1,
+                IpAddr::V6(_) => s.v6 += 1,
+            }
+            if rec.last_success_ms <= 0 {
+                s.failed += 1;
+                continue;
+            }
+            let age = now_ms.saturating_sub(rec.last_success_ms);
+            if age <= stale_good_ms {
+                s.good += 1;
+                if age > 0 {
+                    sum_age_ms += u128::from(u64::try_from(age).unwrap_or(0));
+                }
+            } else {
+                s.failed += 1;
+            }
+        }
+        if s.good > 0 {
+            s.avg_success_age_ms = u64::try_from(sum_age_ms / u128::from(s.good)).unwrap_or(u64::MAX);
+        }
+        Ok(s)
+    }
+
+    /// Read a generic blob from the KV table.
+    pub fn get_blob(&self, key: &str) -> Result<Option<Vec<u8>>, Error> {
+        let txn = self.db.begin_read()?;
+        let t = txn.open_table(KV)?;
+        Ok(t.get(key)?.map(|v| v.value().to_vec()))
+    }
+
+    /// Write a generic blob to the KV table.
+    pub fn put_blob(&self, key: &str, value: &[u8]) -> Result<(), Error> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut t = txn.open_table(KV)?;
+            t.insert(key, value)?;
+        }
+        txn.commit()?;
+        Ok(())
     }
 }
 

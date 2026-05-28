@@ -31,11 +31,13 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn ping() -> &'static str {
+async fn ping(State(state): State<AppState>) -> &'static str {
+    state.metrics.record_request();
     "pong"
 }
 
 async fn health(State(state): State<AppState>) -> Response {
+    state.metrics.record_request();
     match state.store.len() {
         Ok(count) => Json(json!({ "status": "ok", "peers": count })).into_response(),
         Err(err) => {
@@ -46,6 +48,7 @@ async fn health(State(state): State<AppState>) -> Response {
 }
 
 async fn list_peers(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    state.metrics.record_request();
     let filter = Filter {
         now_ms: now_ms(),
         dead_after_ms: i64::MAX,
@@ -70,6 +73,7 @@ async fn list_peers(State(state): State<AppState>, headers: HeaderMap) -> Respon
 }
 
 async fn get_peer(State(state): State<AppState>, Path(addr_str): Path<String>, headers: HeaderMap) -> Response {
+    state.metrics.record_request();
     let addr = match SocketAddr::from_str(&addr_str) {
         Ok(a) => a,
         Err(err) => return (StatusCode::BAD_REQUEST, format!("addr must be ip:port — {err}")).into_response(),
@@ -101,10 +105,12 @@ async fn submit_peer(
     headers: HeaderMap,
     body: String,
 ) -> Response {
+    state.metrics.record_request();
     // Auth: when an api key is configured, the POST is gated by it.
     if let Some(expected) = state.config.api_key.as_deref() {
         let presented = headers.get(&X_API_KEY).and_then(|v| v.to_str().ok());
         if presented != Some(expected) {
+            state.metrics.record_rejected();
             return (StatusCode::UNAUTHORIZED, "missing or invalid api key").into_response();
         }
     }
@@ -113,33 +119,41 @@ async fn submit_peer(
     if !state.config.allowed_origins.is_empty() {
         let origin = headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok()).unwrap_or("");
         if !state.config.allowed_origins.iter().any(|o| o == origin) {
+            state.metrics.record_rejected();
             return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
         }
     }
 
     let client_ip = client_ip(&headers, remote);
     if !state.limiter.check(client_ip) {
+        state.metrics.record_rejected();
         return (StatusCode::TOO_MANY_REQUESTS, "rate limited").into_response();
     }
 
     let addr = match SocketAddr::from_str(body.trim()) {
         Ok(a) => a,
-        Err(err) => return (StatusCode::BAD_REQUEST, format!("invalid ip:port — {err}")).into_response(),
+        Err(err) => {
+            state.metrics.record_rejected();
+            return (StatusCode::BAD_REQUEST, format!("invalid ip:port — {err}")).into_response();
+        }
     };
 
     let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
     if !is_acceptable_address(&net, state.config.network_default_port, state.config.strict_port) {
+        state.metrics.record_rejected();
         return (StatusCode::BAD_REQUEST, "address is not publicly routable or uses a disallowed port").into_response();
     }
     let addr = SocketAddr::new(net.ip, net.port);
 
     match state.prober.probe(addr).await {
         Ok(rec) => {
+            state.metrics.record_accepted();
             debug!("web: POST /peers accepted {addr} (probe ok)");
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
             (StatusCode::OK, Json(PeerDto::from_record(&rec, expose, state.config.network_default_port))).into_response()
         }
         Err(err) => {
+            state.metrics.record_rejected();
             debug!("web: POST /peers probe of {addr} failed: {err}");
             (StatusCode::BAD_GATEWAY, format!("probe failed: {err}")).into_response()
         }

@@ -15,6 +15,7 @@
 pub mod config;
 pub mod dto;
 pub mod error;
+pub mod metrics;
 pub mod prober;
 pub mod rate_limit;
 pub mod router;
@@ -29,6 +30,7 @@ mod router_tests;
 pub use config::WebConfig;
 pub use dto::PeerDto;
 pub use error::Error;
+pub use metrics::{WebMetrics, WebSnapshot};
 pub use prober::{Prober, SchedulerProber};
 pub use router::build_router;
 pub use server::run_web_server;

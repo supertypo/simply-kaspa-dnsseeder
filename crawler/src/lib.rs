@@ -11,6 +11,7 @@ pub mod error;
 pub mod model;
 pub mod probe;
 pub mod probe_initializer;
+pub mod metrics;
 pub mod scheduler;
 pub mod seeders;
 
@@ -26,6 +27,7 @@ mod scheduler_tests;
 mod seeders_tests;
 
 pub use error::{Error, ProbeError};
+pub use metrics::{CrawlerMetrics, CrawlerSnapshot};
 pub use model::{EPHEMERAL_PORT_FLOOR, ProbeResult, is_acceptable_address, peer_record_from_version};
 pub use probe::{KaspadProbe, Probe};
 pub use probe_initializer::ProbeInitializerConfig;

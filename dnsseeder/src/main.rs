@@ -2,11 +2,14 @@
 //! together. Logging, signal handling and a graceful shutdown broadcast
 //! are managed here; everything domain-specific lives in the library crates.
 
+mod stats;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use clap::Parser;
@@ -16,11 +19,13 @@ use simply_kaspa_dnsseeder_cli::CliArgs;
 use simply_kaspa_dnsseeder_crawler::{
     KaspadProbe, ProbeInitializerConfig, Scheduler, SchedulerConfig, TokioResolver,
 };
-use simply_kaspa_dnsseeder_dns::{DnsConfig, run_dns_server};
+use simply_kaspa_dnsseeder_dns::{DnsConfig, SeederHandler};
 use simply_kaspa_dnsseeder_store::PeerStore;
 use simply_kaspa_dnsseeder_web::{AppState, SchedulerProber, WebConfig, run_web_server};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::broadcast;
+
+use crate::stats::{Metrics, stats_loop};
 
 #[tokio::main]
 async fn main() {
@@ -46,6 +51,9 @@ async fn run(cli: CliArgs) -> Result<()> {
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     spawn_signal_handler(shutdown_tx.clone());
 
+    let metrics = Metrics::new(network_id, CliArgs::version(), cli.stale_good);
+    metrics.load_from(&store);
+
     let probe_cfg = ProbeInitializerConfig::new(network_id, cli.probe_timeout);
     let probe = Arc::new(KaspadProbe::new(probe_cfg));
 
@@ -60,7 +68,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         strict_port: cli.strict_port,
     };
     let resolver = Arc::new(TokioResolver);
-    let scheduler = Scheduler::new(scheduler_cfg, store.clone(), probe.clone(), resolver);
+    let scheduler = Scheduler::with_metrics(scheduler_cfg, store.clone(), probe.clone(), resolver, metrics.crawler.clone());
 
     let scheduler_shutdown = shutdown_tx.subscribe();
     let scheduler_task = tokio::spawn(async move {
@@ -83,10 +91,12 @@ async fn run(cli: CliArgs) -> Result<()> {
                 cli.dns_nameserver.clone().expect("dns_enabled implies dns_nameserver"),
             )
         };
-        let dns_store = store.clone();
+        let tcp_idle = dns_cfg.tcp_idle_timeout;
+        let handler = SeederHandler::with_metrics(dns_cfg, store.clone(), metrics.dns.clone())
+            .context("building dns handler")?;
         let dns_shutdown = shutdown_tx.subscribe();
         Some(tokio::spawn(async move {
-            match run_dns_server(dns_cfg, dns_store, dns_shutdown).await {
+            match simply_kaspa_dnsseeder_dns::run_dns_server_with_handler(handler, dns_listen, tcp_idle, dns_shutdown).await {
                 Ok(()) => info!("dns: shut down cleanly"),
                 Err(err) => error!("dns server exited: {err}"),
             }
@@ -108,7 +118,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         strict_port: cli.strict_port,
     };
     let prober = Arc::new(SchedulerProber::new(probe.clone(), store.clone()));
-    let state = AppState::new(store.clone(), prober, web_cfg);
+    let state = AppState::with_metrics(store.clone(), prober, web_cfg, metrics.web.clone());
     let web_shutdown = shutdown_tx.subscribe();
     let web_task = tokio::spawn(async move {
         match run_web_server(state, web_shutdown).await {
@@ -117,11 +127,27 @@ async fn run(cli: CliArgs) -> Result<()> {
         }
     });
 
+    let stats_task = if cli.stats_interval > Duration::ZERO {
+        info!("stats: dumping every {:?}", cli.stats_interval);
+        let stats_shutdown = shutdown_tx.subscribe();
+        let stats_store = store.clone();
+        let stats_metrics = metrics.clone();
+        Some(tokio::spawn(async move {
+            stats_loop(stats_metrics, stats_store, cli.stats_interval, stats_shutdown).await;
+        }))
+    } else {
+        info!("stats: periodic dump disabled");
+        None
+    };
+
     let _ = scheduler_task.await;
     if let Some(dns) = dns_task {
         let _ = dns.await;
     }
     let _ = web_task.await;
+    if let Some(stats) = stats_task {
+        let _ = stats.await;
+    }
     Ok(())
 }
 

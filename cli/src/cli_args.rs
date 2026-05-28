@@ -95,6 +95,10 @@ pub struct CliArgs {
     /// Disable colored stdout output.
     #[clap(long)]
     pub log_no_color: bool,
+
+    /// Periodic stats dump interval. Set to `0s` to disable.
+    #[clap(long, default_value = "1m", value_parser = humantime::parse_duration)]
+    pub stats_interval: Duration,
 }
 
 impl CliArgs {

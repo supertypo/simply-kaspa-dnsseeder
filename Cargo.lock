@@ -3082,10 +3082,12 @@ name = "simply-kaspa-dnsseeder"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "clap",
  "env_logger",
  "kaspa-consensus-core",
  "log",
+ "serde",
  "simply-kaspa-dnsseeder-cli",
  "simply-kaspa-dnsseeder-crawler",
  "simply-kaspa-dnsseeder-dns",
