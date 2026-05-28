@@ -7,8 +7,6 @@ fn rec(now_ms: i64, ua: &str, port: u16, ipv6: bool, pv: u32) -> PeerRecord {
     PeerRecord {
         id: [1; 16],
         protocol_version: pv,
-        network: "kaspa-mainnet".into(),
-        services: 0,
         timestamp_ms: now_ms,
         address: NetAddress {
             ip: if ipv6 {
@@ -19,7 +17,6 @@ fn rec(now_ms: i64, ua: &str, port: u16, ipv6: bool, pv: u32) -> PeerRecord {
             port,
         },
         user_agent: ua.into(),
-        disable_relay_tx: false,
         subnetwork_id: None,
         first_seen_ms: now_ms,
         last_attempt_ms: now_ms,

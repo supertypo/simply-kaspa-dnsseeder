@@ -8,12 +8,9 @@ fn make_rec(id_byte: u8, ip: Ipv4Addr, port: u16, last_seen_ms: i64) -> PeerReco
     PeerRecord {
         id: [id_byte; 16],
         protocol_version: 7,
-        network: "kaspa-mainnet".into(),
-        services: 0,
         timestamp_ms: last_seen_ms,
         address: NetAddress { ip: IpAddr::V4(ip), port },
         user_agent: "/kaspad:1.0.0/".into(),
-        disable_relay_tx: false,
         subnetwork_id: None,
         first_seen_ms: last_seen_ms,
         last_attempt_ms: last_seen_ms,

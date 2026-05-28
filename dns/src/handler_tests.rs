@@ -27,12 +27,9 @@ fn make_record(id: u8, ip: IpAddr, now_ms: i64) -> PeerRecord {
     PeerRecord {
         id: peer_id,
         protocol_version: 7,
-        network: "kaspa-mainnet".to_string(),
-        services: 0,
         timestamp_ms: now_ms,
         address: NetAddress { ip, port: NetworkId::new(NetworkType::Mainnet).default_p2p_port() },
         user_agent: "/kaspad:1.0.0/".to_string(),
-        disable_relay_tx: true,
         subnetwork_id: None,
         first_seen_ms: now_ms,
         last_attempt_ms: now_ms,

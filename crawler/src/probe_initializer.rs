@@ -11,7 +11,7 @@ use kaspa_p2p_lib::pb::{
 use kaspa_p2p_lib::{
     ConnectionInitializer, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message,
 };
-use kaspa_utils::networking::IpAddress;
+use kaspa_utils::networking::{IpAddress, PeerId};
 use log::{debug, trace, warn};
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -80,6 +80,13 @@ impl ProbeInitializer {
             peer_version.user_agent,
             peer_version.network,
         );
+        // Update the router's identity from the peer's reported UUID so the
+        // Hub keys connections by the real peer id instead of `Uuid::nil()`,
+        // eliminating spurious "duplicate key" evictions when the same IP is
+        // re-probed before the previous Hub entry expires.
+        if let Ok(peer_id) = PeerId::from_slice(&peer_version.id) {
+            router.set_identity(peer_id);
+        }
 
         // 2. Reply with a Version that mirrors the peer's protocol_version + services.
         let our_version = pb::VersionMessage {

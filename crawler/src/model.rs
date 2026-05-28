@@ -30,12 +30,9 @@ pub fn peer_record_from_version(addr: SocketAddr, version: &VersionMessage, now_
     PeerRecord {
         id,
         protocol_version: version.protocol_version,
-        network: version.network.clone(),
-        services: version.services,
         timestamp_ms: version.timestamp,
         address,
         user_agent: version.user_agent.clone(),
-        disable_relay_tx: version.disable_relay_tx,
         subnetwork_id,
         first_seen_ms,
         last_attempt_ms: now_ms,

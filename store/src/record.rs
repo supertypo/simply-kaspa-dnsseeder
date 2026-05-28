@@ -19,12 +19,9 @@ pub struct NetAddress {
 pub struct PeerRecord {
     pub id: PeerId,
     pub protocol_version: u32,
-    pub network: String,
-    pub services: u64,
     pub timestamp_ms: i64,
     pub address: NetAddress,
     pub user_agent: String,
-    pub disable_relay_tx: bool,
     pub subnetwork_id: Option<[u8; 20]>,
     pub first_seen_ms: i64,
     pub last_attempt_ms: i64,
