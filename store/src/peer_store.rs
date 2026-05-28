@@ -1,13 +1,19 @@
 use crate::error::Error;
 use crate::filter::Filter;
-use crate::record::{PeerId, PeerRecord};
+use crate::record::{NetAddress, PeerRecord};
 use log::{debug, warn};
 use redb::{Database, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::path::Path;
 use std::sync::Arc;
 
-/// redb table: key = raw 16-byte peer id, value = bincoded `PeerRecord`.
-const PEERS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("peers");
+/// redb table: key = bincoded `NetAddress` (ip + port), value = bincoded `PeerRecord`.
+///
+/// The `_v2` suffix distinguishes this from the prior id-keyed schema; opening an
+/// old database simply ignores the legacy `peers` table and starts fresh.
+const PEERS: TableDefinition<&[u8], &[u8]> = TableDefinition::new("peers_v2");
+
+/// Sentinel id used for records created before a successful handshake.
+pub const UNKNOWN_PEER_ID: [u8; 16] = [0u8; 16];
 
 /// Thread-safe handle to the peer database.
 #[derive(Clone)]
@@ -45,7 +51,7 @@ impl PeerStore {
             let t = txn.open_table(PEERS)?;
             for entry in t.iter()? {
                 let (k, v) = entry?;
-                if decode(v.value()).is_err() {
+                if decode_record(v.value()).is_err() {
                     to_delete.push(k.value().to_vec());
                 }
             }
@@ -64,35 +70,72 @@ impl PeerStore {
         Ok(to_delete.len())
     }
 
-    /// Insert or update a record, overwriting any previous record with the same id.
+    /// Insert or update a record. Keyed by `rec.address`.
     pub fn upsert(&self, rec: &PeerRecord) -> Result<(), Error> {
-        let bytes = encode(rec)?;
+        let key = encode_key(&rec.address)?;
+        let bytes = encode_record(rec)?;
         let txn = self.db.begin_write()?;
         {
             let mut t = txn.open_table(PEERS)?;
-            t.insert(rec.id.as_slice(), bytes.as_slice())?;
+            t.insert(key.as_slice(), bytes.as_slice())?;
         }
         txn.commit()?;
         Ok(())
     }
 
-    pub fn get(&self, id: &PeerId) -> Result<Option<PeerRecord>, Error> {
+    /// Look up a record by its address.
+    pub fn get(&self, addr: &NetAddress) -> Result<Option<PeerRecord>, Error> {
+        let key = encode_key(addr)?;
         let txn = self.db.begin_read()?;
         let t = txn.open_table(PEERS)?;
-        match t.get(id.as_slice())? {
-            Some(v) => Ok(Some(decode(v.value())?)),
+        match t.get(key.as_slice())? {
+            Some(v) => Ok(Some(decode_record(v.value())?)),
             None => Ok(None),
         }
     }
 
-    pub fn delete(&self, id: &PeerId) -> Result<bool, Error> {
+    /// Delete a record by its address. Returns whether a row was removed.
+    pub fn delete(&self, addr: &NetAddress) -> Result<bool, Error> {
+        let key = encode_key(addr)?;
         let txn = self.db.begin_write()?;
         let removed = {
             let mut t = txn.open_table(PEERS)?;
-            t.remove(id.as_slice())?.is_some()
+            t.remove(key.as_slice())?.is_some()
         };
         txn.commit()?;
         Ok(removed)
+    }
+
+    /// Record an attempt at `addr` taken at `now_ms`. Creates a stub record
+    /// (`id` = [`UNKNOWN_PEER_ID`], `last_seen_ms` = 0) if none exists, else
+    /// only refreshes `last_attempt_ms` on the existing record.
+    pub fn record_attempt(&self, addr: &NetAddress, now_ms: i64) -> Result<PeerRecord, Error> {
+        let key = encode_key(addr)?;
+        let txn = self.db.begin_write()?;
+        let rec = {
+            let mut t = txn.open_table(PEERS)?;
+            let mut rec = match t.get(key.as_slice())? {
+                Some(v) => decode_record(v.value())?,
+                None => PeerRecord {
+                    id: UNKNOWN_PEER_ID,
+                    protocol_version: 0,
+                    timestamp_ms: 0,
+                    address: *addr,
+                    user_agent: String::new(),
+                    subnetwork_id: None,
+                    first_seen_ms: now_ms,
+                    last_attempt_ms: now_ms,
+                    last_success_ms: 0,
+                    last_seen_ms: 0,
+                },
+            };
+            rec.last_attempt_ms = now_ms;
+            let bytes = encode_record(&rec)?;
+            t.insert(key.as_slice(), bytes.as_slice())?;
+            rec
+        };
+        txn.commit()?;
+        Ok(rec)
     }
 
     /// Returns the number of stored records.
@@ -113,7 +156,7 @@ impl PeerStore {
         let t = txn.open_table(PEERS)?;
         for entry in t.iter()? {
             let (_, v) = entry?;
-            match decode(v.value()) {
+            match decode_record(v.value()) {
                 Ok(rec) => {
                     if filter.matches(&rec) {
                         out.push(rec);
@@ -132,7 +175,7 @@ impl PeerStore {
         let t = txn.open_table(PEERS)?;
         for entry in t.iter()? {
             let (_, v) = entry?;
-            match decode(v.value()) {
+            match decode_record(v.value()) {
                 Ok(rec) => out.push(rec),
                 Err(e) => warn!("store: skipping corrupt record: {e}"),
             }
@@ -140,8 +183,12 @@ impl PeerStore {
         Ok(out)
     }
 
-    /// Delete every record whose `last_seen_ms` is older than `cutoff_ms`.
-    /// Returns the number of records removed.
+    /// Delete every record where both `last_seen_ms` and `first_seen_ms` are
+    /// older than `cutoff_ms`. This handles two cases uniformly:
+    ///   - peers we used to reach but haven't recently (`last_seen_ms` stale, and
+    ///     `first_seen_ms <= last_seen_ms` is therefore also stale).
+    ///   - peers we've been trying for a while but never successfully reached
+    ///     (`last_seen_ms == 0`, so they go as soon as `first_seen_ms < cutoff_ms`).
     pub fn prune_dead(&self, cutoff_ms: i64) -> Result<usize, Error> {
         let mut to_delete: Vec<Vec<u8>> = Vec::new();
         {
@@ -149,8 +196,8 @@ impl PeerStore {
             let t = txn.open_table(PEERS)?;
             for entry in t.iter()? {
                 let (k, v) = entry?;
-                if let Ok(rec) = decode(v.value()) {
-                    if rec.last_seen_ms < cutoff_ms {
+                if let Ok(rec) = decode_record(v.value()) {
+                    if rec.last_seen_ms < cutoff_ms && rec.first_seen_ms < cutoff_ms {
                         to_delete.push(k.value().to_vec());
                     }
                 }
@@ -172,12 +219,16 @@ impl PeerStore {
     }
 }
 
-fn encode(rec: &PeerRecord) -> Result<Vec<u8>, Error> {
+fn encode_record(rec: &PeerRecord) -> Result<Vec<u8>, Error> {
     bincode::serde::encode_to_vec(rec, bincode::config::standard()).map_err(|e| Error::Encode(e.to_string()))
 }
 
-fn decode(bytes: &[u8]) -> Result<PeerRecord, Error> {
+fn decode_record(bytes: &[u8]) -> Result<PeerRecord, Error> {
     bincode::serde::decode_from_slice(bytes, bincode::config::standard())
         .map(|(v, _)| v)
         .map_err(|e| Error::Decode(e.to_string()))
+}
+
+fn encode_key(addr: &NetAddress) -> Result<Vec<u8>, Error> {
+    bincode::serde::encode_to_vec(addr, bincode::config::standard()).map_err(|e| Error::Encode(e.to_string()))
 }

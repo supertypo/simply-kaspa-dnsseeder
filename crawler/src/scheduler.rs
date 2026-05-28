@@ -11,7 +11,7 @@ use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 use tokio::sync::{Semaphore, broadcast, mpsc};
 
 use crate::error::Error;
-use crate::model::{ProbeResult, canonicalize_ip, now_ms, peer_id_from_bytes, peer_record_from_version};
+use crate::model::{ProbeResult, canonicalize_ip, now_ms, peer_record_from_version};
 use crate::probe::Probe;
 use crate::seeders::{Resolver, dns_seed_many};
 
@@ -153,8 +153,16 @@ impl Scheduler {
         };
 
         for addr in bootstrap_addrs {
-            if self.in_flight.insert(addr) {
-                let _ = self.tx.send(addr).await;
+            if !self.in_flight.insert(addr) {
+                continue;
+            }
+            let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+            if let Err(err) = self.store.record_attempt(&net, now_ms()) {
+                warn!("crawler: failed to record bootstrap attempt for {addr}: {err}");
+            }
+            if self.tx.send(addr).await.is_err() {
+                self.in_flight.remove(&addr);
+                break;
             }
         }
         Ok(())
@@ -175,19 +183,26 @@ impl Scheduler {
     async fn enqueue_reprobes(&self) -> Result<(), Error> {
         let now = now_ms();
         let interval_ms = self.config.crawl_interval_ms();
-        let dead_ms = self.config.dead_after_ms();
+        let dead_cutoff = now.saturating_sub(self.config.dead_after_ms());
         let records = self.store.iter_all()?;
         let mut count = 0;
         for rec in records {
-            if now.saturating_sub(rec.last_seen_ms) >= dead_ms {
+            // Skip records that are going to be pruned anyway. This matches
+            // `PeerStore::prune_dead`'s definition of "dead": stale for
+            // previously-seen peers, or never-seen-and-too-old for stubs.
+            if rec.last_seen_ms < dead_cutoff && rec.first_seen_ms < dead_cutoff {
                 continue;
             }
+            // Backoff: don't probe more often than `crawl_interval`.
             if now.saturating_sub(rec.last_attempt_ms) < interval_ms {
                 continue;
             }
             let addr = SocketAddr::new(rec.address.ip, rec.address.port);
             if !self.in_flight.insert(addr) {
                 continue;
+            }
+            if let Err(err) = self.store.record_attempt(&rec.address, now) {
+                warn!("crawler: failed to record reprobe attempt for {addr}: {err}");
             }
             if self.tx.send(addr).await.is_err() {
                 self.in_flight.remove(&addr);
@@ -230,6 +245,10 @@ impl Scheduler {
                     if !in_flight.insert(new_addr) {
                         continue;
                     }
+                    let net = NetAddress { ip: canonical, port };
+                    if let Err(err) = store.record_attempt(&net, now_ms()) {
+                        warn!("crawler: failed to record discovery attempt for {new_addr}: {err}");
+                    }
                     if tx.try_send(new_addr).is_err() {
                         in_flight.remove(&new_addr);
                         break;
@@ -265,24 +284,15 @@ pub(crate) fn is_routable(ip: IpAddr) -> bool {
 }
 
 fn apply_success(store: &PeerStore, addr: SocketAddr, result: &ProbeResult) -> Result<(), simply_kaspa_dnsseeder_store::Error> {
-    let id = peer_id_from_bytes(&result.version.id);
-    let existing = store.get(&id)?;
+    let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+    let existing = store.get(&net)?;
     let record = peer_record_from_version(addr, &result.version, now_ms(), existing.as_ref());
     store.upsert(&record)
 }
 
 fn bump_attempt(store: &PeerStore, addr: SocketAddr) -> Result<(), simply_kaspa_dnsseeder_store::Error> {
-    let canonical = canonicalize_ip(addr.ip());
-    let net = NetAddress { ip: canonical, port: addr.port() };
-    let now = now_ms();
-    let records = store.iter_all()?;
-    for mut rec in records {
-        if rec.address == net {
-            rec.last_attempt_ms = now;
-            return store.upsert(&rec);
-        }
-    }
-    Ok(())
+    let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+    store.record_attempt(&net, now_ms()).map(|_| ())
 }
 
 // Allow the web crate to issue ad-hoc submissions through the same code path.
@@ -297,8 +307,8 @@ impl Scheduler {
     ) -> Result<PeerRecord, crate::error::ProbeError> {
         match probe.probe(addr).await {
             Ok(result) => {
-                let id = peer_id_from_bytes(&result.version.id);
-                let existing = store.get(&id).map_err(|e| crate::error::ProbeError::Connection(e.to_string()))?;
+                let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+                let existing = store.get(&net).map_err(|e| crate::error::ProbeError::Connection(e.to_string()))?;
                 let record = peer_record_from_version(addr, &result.version, now_ms(), existing.as_ref());
                 store.upsert(&record).map_err(|e| crate::error::ProbeError::Connection(e.to_string()))?;
                 Ok(record)

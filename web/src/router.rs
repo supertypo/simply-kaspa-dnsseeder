@@ -77,16 +77,21 @@ async fn get_peer(State(state): State<AppState>, Path(id_hex): Path<String>, hea
     }
     let mut id = [0u8; 16];
     id.copy_from_slice(&bytes);
-    match state.store.get(&id) {
-        Ok(Some(rec)) => {
+    // Store is keyed by address now; scan iter_all for a matching id. This
+    // endpoint is exposed for ops debugging, not heavy traffic.
+    let rec = match state.store.iter_all() {
+        Ok(records) => records.into_iter().find(|r| r.id == id),
+        Err(err) => {
+            warn!("/peers/{{id}} store error: {err}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response();
+        }
+    };
+    match rec {
+        Some(rec) => {
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
             Json(PeerDto::from_record(&rec, expose)).into_response()
         }
-        Ok(None) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
-        Err(err) => {
-            warn!("/peers/{{id}} store error: {err}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response()
-        }
+        None => (StatusCode::NOT_FOUND, "peer not found").into_response(),
     }
 }
 

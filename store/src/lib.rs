@@ -1,7 +1,8 @@
 //! Persistent peer store backed by `redb`, plus a query filter.
 //!
-//! Records are keyed by the peer-reported 16-byte `id`. Last-write-wins
-//! semantics: re-observing an `id` at a new address overwrites the old one.
+//! Records are keyed by `NetAddress` (ip + port). A record is written on
+//! every probe attempt (including failures) so `last_attempt_ms` can gate
+//! re-probes without any in-memory backoff bookkeeping.
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
@@ -17,5 +18,5 @@ mod peer_store_tests;
 
 pub use error::Error;
 pub use filter::{Family, Filter};
-pub use peer_store::PeerStore;
+pub use peer_store::{PeerStore, UNKNOWN_PEER_ID};
 pub use record::{NetAddress, PeerRecord, PeerId};
