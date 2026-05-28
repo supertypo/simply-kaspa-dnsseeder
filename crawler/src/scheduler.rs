@@ -24,8 +24,6 @@ pub struct SchedulerConfig {
     pub dead_after: Duration,
     /// Explicit DNS seeder hosts (`--seeder`), tried at bootstrap if non-empty.
     pub seeders: Vec<String>,
-    /// Explicit peer socket addresses (`--known-peers`) enqueued at startup.
-    pub known_peers: Vec<SocketAddr>,
 }
 
 impl SchedulerConfig {
@@ -93,8 +91,6 @@ impl Scheduler {
         let semaphore = Arc::new(Semaphore::new(self.config.threads.max(1)));
         let mut reprobe_ticker = tokio::time::interval(self.config.crawl_interval);
         reprobe_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        // First tick fires immediately; we already bootstrapped, so skip it.
-        reprobe_ticker.tick().await;
         let mut prune_ticker = tokio::time::interval(self.config.crawl_interval);
         prune_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         prune_ticker.tick().await;
@@ -142,20 +138,9 @@ impl Scheduler {
     }
 
     async fn bootstrap(&self) -> Result<(), Error> {
-        for addr in &self.config.known_peers {
-            if self.in_flight.insert(*addr) {
-                let _ = self.tx.send(*addr).await;
-            }
-        }
-
         let store_empty = self.store.is_empty()?;
         if !store_empty {
             debug!("crawler: store non-empty, skipping DNS bootstrap");
-            return Ok(());
-        }
-
-        if !self.config.known_peers.is_empty() {
-            debug!("crawler: --known-peers supplied, skipping DNS bootstrap");
             return Ok(());
         }
 

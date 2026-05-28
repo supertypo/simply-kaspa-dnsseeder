@@ -14,10 +14,6 @@ pub struct CliArgs {
     #[clap(short = 's', long)]
     pub seeder: Option<String>,
 
-    /// Comma-separated initial peers `host:port,...`.
-    #[clap(short = 'p', long, value_delimiter = ',')]
-    pub known_peers: Vec<String>,
-
     /// Number of concurrent probe workers.
     #[clap(long, default_value = "8")]
     pub threads: usize,
@@ -79,7 +75,7 @@ pub struct CliArgs {
     pub rate_limit_window: Duration,
 
     /// `env_logger` filter (e.g. `info`, `debug`, `simply_kaspa_dnsseeder=trace,info`).
-    #[clap(long, default_value = "info")]
+    #[clap(long, default_value = "warn,simply_kaspa_dnsseeder=info")]
     pub log_level: String,
 
     /// Disable colored stdout output.

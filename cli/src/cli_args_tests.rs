@@ -74,15 +74,7 @@ fn min_user_agent_rejects_garbage() {
 }
 
 #[test]
-fn known_peers_and_origins_parse_csv() {
-    let cli = parse(&[
-        "--network-id",
-        "kaspa-mainnet",
-        "--known-peers",
-        "1.2.3.4:16111,5.6.7.8:16111",
-        "--allowed-origins",
-        "http://a,http://b",
-    ]);
-    assert_eq!(cli.known_peers, vec!["1.2.3.4:16111", "5.6.7.8:16111"]);
+fn allowed_origins_parses_csv() {
+    let cli = parse(&["--network-id", "kaspa-mainnet", "--allowed-origins", "http://a,http://b"]);
     assert_eq!(cli.allowed_origins, vec!["http://a", "http://b"]);
 }

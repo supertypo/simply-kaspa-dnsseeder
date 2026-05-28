@@ -46,8 +46,6 @@ async fn run(cli: CliArgs) -> Result<()> {
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     spawn_signal_handler(shutdown_tx.clone());
 
-    let known_peers = parse_socket_addrs(&cli.known_peers)?;
-
     let probe_cfg = ProbeInitializerConfig::new(network_id, cli.probe_timeout);
     let probe = Arc::new(KaspadProbe::new(probe_cfg));
 
@@ -57,7 +55,6 @@ async fn run(cli: CliArgs) -> Result<()> {
         crawl_interval: cli.crawl_interval,
         dead_after: cli.dead_after,
         seeders: cli.seeder.iter().cloned().collect(),
-        known_peers,
     };
     let resolver = Arc::new(TokioResolver);
     let scheduler = Scheduler::new(scheduler_cfg, store.clone(), probe.clone(), resolver);
@@ -127,12 +124,6 @@ async fn prepare_datadir(raw: &str, network_id: NetworkId) -> Result<PathBuf> {
     };
     tokio::fs::create_dir_all(&dir).await.with_context(|| format!("creating datadir {dir:?}"))?;
     Ok(dir)
-}
-
-fn parse_socket_addrs(raw: &[String]) -> Result<Vec<SocketAddr>> {
-    raw.iter()
-        .map(|s| SocketAddr::from_str(s.trim()).with_context(|| format!("invalid peer `{s}`")))
-        .collect()
 }
 
 fn configure_logging(cli: &CliArgs) {
