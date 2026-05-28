@@ -21,7 +21,7 @@ panic = "abort"
 [workspace.package]
 rust-version = "1.93.1"
 authors = ["simply-kaspa-dnsseeder contributors"]
-license = "ISC"
+license = "MIT"
 edition = "2024"
 
 [workspace.dependencies]
