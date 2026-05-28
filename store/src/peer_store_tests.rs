@@ -1,7 +1,7 @@
 use crate::filter::Filter;
 use crate::peer_store::{PeerStore, UNKNOWN_PEER_ID};
 use crate::record::{NetAddress, PeerRecord};
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use tempfile::tempdir;
 
 fn make_rec(id_byte: u8, ip: Ipv4Addr, port: u16, last_seen_ms: i64) -> PeerRecord {
@@ -197,4 +197,34 @@ fn is_empty_initially() {
     assert!(store.is_empty().unwrap());
     store.upsert(&make_rec(1, Ipv4Addr::new(1, 1, 1, 1), 16111, 100)).unwrap();
     assert!(!store.is_empty().unwrap());
+}
+
+#[test]
+fn summary_v4_v6_counts_only_good_subset() {
+    let (_dir, store) = open_temp_store();
+    // Two v4 peers within stale_good window.
+    let mut r1 = make_rec(1, Ipv4Addr::new(1, 1, 1, 1), 16111, 500);
+    r1.last_success_ms = 500;
+    let mut r2 = make_rec(2, Ipv4Addr::new(2, 2, 2, 2), 16111, 500);
+    r2.last_success_ms = 500;
+    // One v4 peer that is stale (success too old).
+    let mut r3 = make_rec(3, Ipv4Addr::new(3, 3, 3, 3), 16111, 50);
+    r3.last_success_ms = 50;
+    // One v4 peer that never succeeded.
+    let mut r4 = make_rec(4, Ipv4Addr::new(4, 4, 4, 4), 16111, 500);
+    r4.last_success_ms = 0;
+    // One v6 peer within window.
+    let mut r6 = make_rec(5, Ipv4Addr::UNSPECIFIED, 16111, 500);
+    r6.address.ip = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+    r6.last_success_ms = 500;
+    for r in [&r1, &r2, &r3, &r4, &r6] {
+        store.upsert(r).unwrap();
+    }
+    // stale_good = 200 → success_ms in (now-200 ..= now) is "good".
+    let s = store.summary(600, 200).unwrap();
+    assert_eq!(s.total, 5);
+    assert_eq!(s.good, 3, "good = 2 v4 + 1 v6 within window");
+    assert_eq!(s.v4, 2, "v4 counts only good subset");
+    assert_eq!(s.v6, 1, "v6 counts only good subset");
+    assert_eq!(s.failed, 2, "stale-good + never-succeeded both count as failed");
 }

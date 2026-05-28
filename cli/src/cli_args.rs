@@ -15,7 +15,7 @@ pub struct CliArgs {
     pub seeder: Option<String>,
 
     /// Number of concurrent probe workers.
-    #[clap(long, default_value = "8")]
+    #[clap(long, default_value = "8", value_parser = parse_positive_usize)]
     pub threads: usize,
 
     /// Maximum total duration of a single probe (connect + handshake + addresses).
@@ -128,4 +128,12 @@ impl CliArgs {
 
 fn parse_semver(s: &str) -> Result<Version, String> {
     Version::parse(s).map_err(|e| format!("invalid semver `{s}`: {e}"))
+}
+
+fn parse_positive_usize(s: &str) -> Result<usize, String> {
+    match s.parse::<usize>() {
+        Ok(0) => Err("value must be >= 1".to_string()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(format!("invalid integer `{s}`: {e}")),
+    }
 }

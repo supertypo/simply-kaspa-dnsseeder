@@ -267,14 +267,30 @@ impl Scheduler {
             let metrics = self.metrics.clone();
             // Acquire the permit inside the task so the dispatch loop stays responsive to shutdown.
             tokio::spawn(async move {
+                // Drop guard ensures `in_flight` is freed and the gauge is decremented
+                // even if `probe_one` panics — without this, a panic would leak the slot
+                // and starve the back-pressure cap forever.
+                struct InFlightGuard {
+                    addr: SocketAddr,
+                    in_flight: Arc<DashSet<SocketAddr>>,
+                    metrics: Arc<CrawlerMetrics>,
+                    armed: bool,
+                }
+                impl Drop for InFlightGuard {
+                    fn drop(&mut self) {
+                        if self.armed {
+                            self.metrics.in_flight_dec();
+                        }
+                        self.in_flight.remove(&self.addr);
+                    }
+                }
+                let mut guard = InFlightGuard { addr, in_flight, metrics: metrics.clone(), armed: false };
                 let Ok(_permit) = semaphore.acquire_owned().await else {
-                    in_flight.remove(&addr);
                     return;
                 };
                 metrics.in_flight_inc();
+                guard.armed = true;
                 Self::probe_one(probe.as_ref(), &store, addr, default_port, strict_port, Some(&metrics)).await;
-                metrics.in_flight_dec();
-                in_flight.remove(&addr);
             });
         }
         debug!(

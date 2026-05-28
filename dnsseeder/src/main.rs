@@ -152,13 +152,21 @@ async fn run(cli: CliArgs) -> Result<()> {
         None
     };
 
-    let _ = scheduler_task.await;
-    if let Some(dns) = dns_task {
-        let _ = dns.await;
+    if let Err(err) = scheduler_task.await {
+        error!("scheduler task ended unexpectedly: {err}");
     }
-    let _ = web_task.await;
-    if let Some(stats) = stats_task {
-        let _ = stats.await;
+    if let Some(dns) = dns_task
+        && let Err(err) = dns.await
+    {
+        error!("dns task ended unexpectedly: {err}");
+    }
+    if let Err(err) = web_task.await {
+        error!("web task ended unexpectedly: {err}");
+    }
+    if let Some(stats) = stats_task
+        && let Err(err) = stats.await
+    {
+        error!("stats task ended unexpectedly: {err}");
     }
     Ok(())
 }

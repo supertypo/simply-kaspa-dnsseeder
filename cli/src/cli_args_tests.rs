@@ -31,6 +31,19 @@ fn defaults_match_spec() {
     assert!(cli.allowed_origins.is_empty());
     assert!(!cli.dns_enabled());
     assert!(!cli.strict_port);
+    assert_eq!(cli.datadir, "data");
+    assert_eq!(cli.api_prefix, "/api");
+    assert_eq!(cli.log_level, "warn,simply_kaspa_dnsseeder=info");
+    assert!(!cli.log_no_color);
+    assert_eq!(cli.stats_interval, Duration::from_secs(60));
+    assert!(cli.min_protocol_version.is_none());
+    assert!(cli.min_user_agent.is_none());
+}
+
+#[test]
+fn threads_zero_rejected() {
+    let res = CliArgs::try_parse_from(["simply-kaspa-dnsseeder", "--network-id", "kaspa-mainnet", "--threads", "0"]);
+    assert!(res.is_err(), "--threads 0 must be rejected");
 }
 
 #[test]

@@ -15,6 +15,11 @@ use crate::dto::PeerDto;
 use crate::state::AppState;
 use crate::util::{X_API_KEY, canonicalize_ip, client_ip, expose_ip, now_ms};
 
+/// Hard cap on `GET /peers` response size so a large store can't OOM a client
+/// or the process. The 1000 most-recently-successful peers is plenty for any
+/// UI use; clients that need more should use the DNS interface.
+const MAX_LIST_RESPONSE: usize = 1000;
+
 pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {
     state.metrics.record_request();
     "pong"
@@ -39,6 +44,9 @@ pub(crate) async fn list(State(state): State<AppState>, headers: HeaderMap) -> R
         }
     };
     records.sort_by_key(|r| std::cmp::Reverse(r.last_success_ms));
+    if records.len() > MAX_LIST_RESPONSE {
+        records.truncate(MAX_LIST_RESPONSE);
+    }
     let expose = expose_ip(&headers, state.config.api_key.as_deref());
     let default_port = state.config.network_default_port;
     let dtos: Vec<PeerDto> = records.iter().map(|r| PeerDto::from_record(r, expose, default_port)).collect();
@@ -47,9 +55,8 @@ pub(crate) async fn list(State(state): State<AppState>, headers: HeaderMap) -> R
 
 pub(crate) async fn get(State(state): State<AppState>, Path(addr_str): Path<String>, headers: HeaderMap) -> Response {
     state.metrics.record_request();
-    let addr = match SocketAddr::from_str(&addr_str) {
-        Ok(a) => a,
-        Err(err) => return (StatusCode::BAD_REQUEST, format!("addr must be ip:port — {err}")).into_response(),
+    let Ok(addr) = SocketAddr::from_str(&addr_str) else {
+        return (StatusCode::BAD_REQUEST, "addr must be ip:port").into_response();
     };
     let net = NetAddress {
         ip: canonicalize_ip(addr.ip()),
@@ -97,12 +104,9 @@ pub(crate) async fn submit(
         return (StatusCode::TOO_MANY_REQUESTS, "rate limited").into_response();
     }
 
-    let addr = match SocketAddr::from_str(body.trim()) {
-        Ok(a) => a,
-        Err(err) => {
-            state.metrics.record_rejected();
-            return (StatusCode::BAD_REQUEST, format!("invalid ip:port — {err}")).into_response();
-        }
+    let Ok(addr) = SocketAddr::from_str(body.trim()) else {
+        state.metrics.record_rejected();
+        return (StatusCode::BAD_REQUEST, "invalid ip:port").into_response();
     };
 
     let net = NetAddress {
