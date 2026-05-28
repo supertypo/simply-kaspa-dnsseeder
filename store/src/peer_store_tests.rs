@@ -228,3 +228,88 @@ fn summary_v4_v6_counts_only_good_subset() {
     assert_eq!(s.v6, 1, "v6 counts only good subset");
     assert_eq!(s.failed, 2, "stale-good + never-succeeded both count as failed");
 }
+
+#[test]
+fn due_for_probe_returns_oldest_first_and_respects_max() {
+    let (_dir, store) = open_temp_store();
+    // 5 peers, all "good class" (last_success_ms > 0), different last_attempt_ms.
+    let mut recs = Vec::new();
+    for (i, last_attempt) in [50_i64, 10, 100, 30, 70].into_iter().enumerate() {
+        #[allow(clippy::cast_possible_truncation)]
+        let mut r = make_rec(i as u8 + 1, Ipv4Addr::new(10, 0, 0, i as u8 + 1), 16111, 1_000);
+        r.last_attempt_ms = last_attempt;
+        r.last_success_ms = last_attempt;
+        store.upsert(&r).unwrap();
+        recs.push(r);
+    }
+    // now=10_000, stale_good=100 → eligible iff last_attempt_ms <= 9_900.
+    // All five qualify; ordering should be ascending by last_attempt_ms: 10, 30, 50, 70, 100.
+    let out = store.due_for_probe(10_000, 100, 1_000, 0, 3).unwrap();
+    assert_eq!(out.len(), 3);
+    assert_eq!(out[0].last_attempt_ms, 10);
+    assert_eq!(out[1].last_attempt_ms, 30);
+    assert_eq!(out[2].last_attempt_ms, 50);
+}
+
+#[test]
+fn due_for_probe_stops_at_threshold() {
+    let (_dir, store) = open_temp_store();
+    let mut r_old = make_rec(1, Ipv4Addr::new(1, 1, 1, 1), 16111, 1_000);
+    r_old.last_attempt_ms = 0;
+    r_old.last_success_ms = 0; // bad class → needs stale_bad_ms (=500) elapsed
+    let mut r_recent = make_rec(2, Ipv4Addr::new(2, 2, 2, 2), 16111, 1_000);
+    r_recent.last_attempt_ms = 990; // very recent
+    r_recent.last_success_ms = 990;
+    store.upsert(&r_old).unwrap();
+    store.upsert(&r_recent).unwrap();
+    // now=1_000, stale_good=100 → recent (since_attempt=10) cannot be eligible.
+    let out = store.due_for_probe(1_000, 100, 500, 0, 10).unwrap();
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].address.ip, IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)));
+}
+
+#[test]
+fn due_for_probe_filters_bad_class_within_stale_bad_window() {
+    let (_dir, store) = open_temp_store();
+    // Bad-class (never succeeded), attempted 200ms ago.
+    let mut r = make_rec(1, Ipv4Addr::new(1, 1, 1, 1), 16111, 1_000);
+    r.last_attempt_ms = 800;
+    r.last_success_ms = 0;
+    store.upsert(&r).unwrap();
+    // stale_good=100, stale_bad=500, now=1_000 → since_attempt=200, threshold=500 → NOT eligible.
+    let out = store.due_for_probe(1_000, 100, 500, 0, 10).unwrap();
+    assert!(out.is_empty(), "bad-class peer still inside stale_bad window must not be returned");
+}
+
+#[test]
+fn record_attempt_updates_index_position() {
+    let (_dir, store) = open_temp_store();
+    let net = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), port: 16111 };
+    // Initial insert via record_attempt at t=0.
+    store.record_attempt(&net, 0).unwrap();
+    // Promote to good class so future eligibility is based on stale_good only.
+    let mut rec = store.get(&net).unwrap().unwrap();
+    rec.last_success_ms = 0; // keep bad class for simplicity
+    store.upsert(&rec).unwrap();
+    // At now=10_000, attempt was at 0, since_attempt=10_000 ≥ stale_bad=500 → eligible.
+    let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();
+    assert_eq!(due.len(), 1);
+    // Bump attempt forward; should drop out of the most-overdue window.
+    store.record_attempt(&net, 9_950).unwrap();
+    // Now since_attempt=50, below stale_good=100 → no longer eligible for any class.
+    let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();
+    assert!(due.is_empty(), "peer should disappear from due list after attempt bump");
+}
+
+#[test]
+fn delete_removes_attempt_index_entry() {
+    let (_dir, store) = open_temp_store();
+    let net = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), port: 16111 };
+    store.insert_stub_if_missing(&net, 0).unwrap();
+    // Stub has last_attempt_ms=0 and is bad-class → eligible when since_attempt ≥ stale_bad.
+    let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();
+    assert_eq!(due.len(), 1);
+    assert!(store.delete(&net).unwrap());
+    let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();
+    assert!(due.is_empty());
+}

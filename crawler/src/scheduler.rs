@@ -19,7 +19,6 @@ use std::time::Duration;
 use dashmap::DashSet;
 use kaspa_consensus_core::network::NetworkId;
 use log::{debug, info, warn};
-use rand::seq::SliceRandom;
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 use tokio::sync::{Semaphore, broadcast};
 
@@ -202,10 +201,10 @@ impl Scheduler {
         out
     }
 
-    /// Scan the store for eligible peers, randomly select up to
-    /// `threads * BATCH_PER_THREAD`, and dispatch probes through the semaphore.
-    /// Skips dispatch entirely when the in-flight backlog has reached
-    /// `threads * MAX_IN_FLIGHT_PER_THREAD` so slow probes can drain.
+    /// Pull the K most-overdue peers from the store's attempt-time index and
+    /// dispatch probes through the semaphore. Skips dispatch entirely when
+    /// the in-flight backlog has reached `threads * MAX_IN_FLIGHT_PER_THREAD`
+    /// so slow probes can drain.
     fn enqueue_probes(&self) -> Result<(), Error> {
         let threads = self.config.threads.max(1);
         let in_flight_cap = threads.saturating_mul(MAX_IN_FLIGHT_PER_THREAD);
@@ -222,37 +221,37 @@ impl Scheduler {
         let default_port = self.config.network_id.default_p2p_port();
         let strict_port = self.config.strict_port;
 
-        let mut eligible: Vec<NetAddress> = Vec::new();
-        let mut total = 0usize;
-        for rec in self.store.iter_all()? {
-            total += 1;
-            if is_eligible(&rec, now, stale_good_ms, stale_bad_ms, dead_cutoff)
-                && is_acceptable_address(&rec.address, default_port, strict_port)
-                && !self.in_flight.contains(&SocketAddr::new(rec.address.ip, rec.address.port))
-            {
-                eligible.push(rec.address);
+        let headroom = in_flight_cap.saturating_sub(current_in_flight);
+        let batch_max = threads.saturating_mul(BATCH_PER_THREAD).min(headroom);
+        // Overfetch to absorb records filtered by `in_flight` / `strict_port` /
+        // private-IP guards without doing another index walk.
+        let fetch_target = batch_max.saturating_mul(2).max(batch_max);
+        let candidates = self.store.due_for_probe(now, stale_good_ms, stale_bad_ms, dead_cutoff, fetch_target)?;
+        let scanned = candidates.len();
+        let mut selected: Vec<NetAddress> = Vec::with_capacity(batch_max);
+        for rec in candidates {
+            if selected.len() >= batch_max {
+                break;
             }
+            if !is_acceptable_address(&rec.address, default_port, strict_port) {
+                continue;
+            }
+            if self.in_flight.contains(&SocketAddr::new(rec.address.ip, rec.address.port)) {
+                continue;
+            }
+            selected.push(rec.address);
         }
 
-        let eligible_count = eligible.len();
-        if eligible.is_empty() {
+        if selected.is_empty() {
             debug!(
-                "crawler: probe tick (scanned={total}, eligible=0, dispatched=0, in_flight={})",
+                "crawler: probe tick (index_scanned={scanned}, dispatched=0, in_flight={})",
                 self.in_flight.len()
             );
             return Ok(());
         }
 
-        let headroom = in_flight_cap.saturating_sub(current_in_flight);
-        let batch_max = threads.saturating_mul(BATCH_PER_THREAD).min(headroom);
-        {
-            let mut rng = rand::thread_rng();
-            eligible.shuffle(&mut rng);
-        }
-        eligible.truncate(batch_max);
-
-        let count = eligible.len();
-        for net in eligible {
+        let count = selected.len();
+        for net in selected {
             let addr = SocketAddr::new(net.ip, net.port);
             if !self.in_flight.insert(addr) {
                 continue;
@@ -294,7 +293,7 @@ impl Scheduler {
             });
         }
         debug!(
-            "crawler: probe tick (scanned={total}, eligible={eligible_count}, dispatched={count}, in_flight={})",
+            "crawler: probe tick (index_scanned={scanned}, dispatched={count}, in_flight={})",
             self.in_flight.len()
         );
         Ok(())
@@ -360,6 +359,10 @@ impl Scheduler {
 /// - It is not past the dead cutoff (matches `prune_dead`'s criterion).
 /// - If it has ever succeeded, `last_attempt` is at least `stale_good_ms` old.
 /// - If it has never succeeded, `last_attempt` is at least `stale_bad_ms` old.
+///
+/// Mirrors the predicate used internally by [`PeerStore::due_for_probe`] —
+/// kept here for unit tests covering scheduler-side semantics.
+#[cfg(test)]
 pub(crate) fn is_eligible(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, stale_bad_ms: i64, dead_cutoff_ms: i64) -> bool {
     if rec.last_seen_ms < dead_cutoff_ms && rec.first_seen_ms < dead_cutoff_ms {
         return false;
