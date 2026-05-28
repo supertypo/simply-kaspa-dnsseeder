@@ -28,6 +28,7 @@ impl RateLimiter {
 
     /// Returns `true` when the caller is within the limit and consumes one
     /// token. Returns `false` when the bucket is empty.
+    #[must_use]
     pub fn check(&self, ip: IpAddr) -> bool {
         if self.capacity == 0 {
             return false;

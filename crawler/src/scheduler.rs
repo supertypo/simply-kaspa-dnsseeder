@@ -36,30 +36,6 @@ impl SchedulerConfig {
     }
 }
 
-/// Cheap handle for outside-the-loop enqueuers (HTTP POST submissions).
-#[derive(Clone)]
-pub struct SchedulerHandle {
-    tx: mpsc::Sender<SocketAddr>,
-    in_flight: Arc<DashSet<SocketAddr>>,
-}
-
-impl SchedulerHandle {
-    /// Attempt to enqueue an address. Returns `true` if accepted, `false` if
-    /// already in flight or the channel is closed.
-    pub async fn enqueue(&self, addr: SocketAddr) -> bool {
-        if !self.in_flight.insert(addr) {
-            return false;
-        }
-        match self.tx.send(addr).await {
-            Ok(()) => true,
-            Err(_) => {
-                self.in_flight.remove(&addr);
-                false
-            }
-        }
-    }
-}
-
 pub struct Scheduler {
     config: SchedulerConfig,
     store: PeerStore,
@@ -77,11 +53,6 @@ impl Scheduler {
         // without blocking the ticker even on a small `--threads` setting.
         let (tx, rx) = mpsc::channel(8192);
         Self { config, store, probe, resolver, tx, rx, in_flight: Arc::new(DashSet::new()) }
-    }
-
-    #[must_use]
-    pub fn handle(&self) -> SchedulerHandle {
-        SchedulerHandle { tx: self.tx.clone(), in_flight: self.in_flight.clone() }
     }
 
     /// Run the scheduler. Returns when `shutdown` fires.
@@ -116,19 +87,15 @@ impl Scheduler {
                 }
                 maybe = self.rx.recv() => {
                     let Some(addr) = maybe else { break };
-                    let permit = match semaphore.clone().acquire_owned().await {
-                        Ok(p) => p,
-                        Err(_) => break,
-                    };
+                    let Ok(permit) = semaphore.clone().acquire_owned().await else { break };
                     let probe = self.probe.clone();
                     let store = self.store.clone();
                     let in_flight = self.in_flight.clone();
                     let tx = self.tx.clone();
                     let default_port = self.config.network_id.default_p2p_port();
-                    let dead_after_ms = self.config.dead_after_ms();
                     tokio::spawn(async move {
                         let _permit = permit;
-                        Self::probe_one(probe.as_ref(), &store, &tx, &in_flight, addr, default_port, dead_after_ms).await;
+                        Self::probe_one(probe.as_ref(), &store, &tx, &in_flight, addr, default_port).await;
                         in_flight.remove(&addr);
                     });
                 }
@@ -225,7 +192,6 @@ impl Scheduler {
         in_flight: &DashSet<SocketAddr>,
         addr: SocketAddr,
         default_port: u16,
-        _dead_after_ms: i64,
     ) {
         match probe.probe(addr).await {
             Ok(result) => {
@@ -321,6 +287,3 @@ impl Scheduler {
         }
     }
 }
-
-#[allow(dead_code)]
-fn _ip_addr_marker(_: IpAddr) {}

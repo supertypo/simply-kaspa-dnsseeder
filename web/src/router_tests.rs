@@ -9,7 +9,7 @@ use axum::http::{Method, Request, StatusCode};
 use simply_kaspa_dnsseeder_crawler::ProbeError;
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 use tempfile::TempDir;
-use tower::ServiceExt;
+use tower::{Service, ServiceExt};
 
 use crate::prober::Prober;
 use crate::{AppState, WebConfig, build_router};
@@ -127,9 +127,31 @@ async fn get_peer_returns_404_when_missing() {
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let state = make_state(Arc::new(MockProber::default()), store, None);
     let app = build_router(state);
-    let id = hex::encode([0u8; 16]);
-    let res = app.oneshot(Request::get(format!("/peers/{id}")).body(Body::empty()).unwrap()).await.unwrap();
+    let res = app.oneshot(Request::get("/peers/9.9.9.9:16111").body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn get_peer_returns_record_by_addr() {
+    let (_temp, store) = seeded_store();
+    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let app = build_router(state);
+    let res = app.oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ip"], "1.2.3.4");
+    assert_eq!(json["port"], 16111);
+}
+
+#[tokio::test]
+async fn get_peer_returns_400_on_bad_addr() {
+    let temp = TempDir::new().unwrap();
+    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
+    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let app = build_router(state);
+    let res = app.oneshot(Request::get("/peers/not-an-addr").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -139,7 +161,7 @@ async fn post_peers_rejects_without_api_key() {
     let state = make_state(Arc::new(MockProber::default()), store, Some("secret".to_string()));
     // We need ConnectInfo present — use into_make_service_with_connect_info path.
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
-    use tower::Service;
+
     let mut svc = app;
     let mut conn = svc.call("127.0.0.1:1234".parse::<SocketAddr>().unwrap()).await.unwrap();
     let req = Request::builder()
@@ -157,7 +179,7 @@ async fn post_peers_probes_and_returns_record() {
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let state = make_state(Arc::new(MockProber::default()), store.clone(), None);
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
-    use tower::Service;
+
     let mut svc = app;
     let mut conn = svc.call(SocketAddr::from_str("127.0.0.1:1234").unwrap()).await.unwrap();
     let req = Request::builder()
@@ -179,7 +201,7 @@ async fn post_peers_returns_502_on_probe_failure() {
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let state = make_state(Arc::new(MockProber { fail: true }), store, None);
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
-    use tower::Service;
+
     let mut svc = app;
     let mut conn = svc.call(SocketAddr::from_str("127.0.0.1:1234").unwrap()).await.unwrap();
     let req = Request::builder()
@@ -204,7 +226,7 @@ async fn rate_limit_blocks_repeated_posts() {
     };
     let state = AppState::new(store, Arc::new(MockProber::default()), cfg);
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
-    use tower::Service;
+
     let mut svc = app;
     let mut conn = svc.call(SocketAddr::from_str("127.0.0.1:1234").unwrap()).await.unwrap();
 

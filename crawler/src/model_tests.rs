@@ -5,7 +5,7 @@ use simply_kaspa_dnsseeder_store::PeerRecord;
 
 use crate::model::{canonicalize_ip, peer_id_from_bytes, peer_record_from_version};
 
-fn version_with(id: Vec<u8>, ua: &str, port_token: u32) -> VersionMessage {
+fn version_with(id: Vec<u8>, ua: &str, _port_token: u32) -> VersionMessage {
     VersionMessage {
         protocol_version: 7,
         services: 0,

@@ -1,4 +1,4 @@
-use crate::record::{NetAddress, PeerRecord};
+use crate::record::PeerRecord;
 use semver::Version;
 
 /// Address family used for DNS filtering.
@@ -33,25 +33,24 @@ impl Filter {
         if self.now_ms - rec.last_seen_ms > self.dead_after_ms {
             return false;
         }
-        if let Some(stale_good) = self.stale_good_ms {
-            if self.now_ms - rec.last_success_ms > stale_good {
-                return false;
-            }
+        if let Some(stale_good) = self.stale_good_ms
+            && self.now_ms - rec.last_success_ms > stale_good
+        {
+            return false;
         }
         if let Some(family) = self.family {
-            let ok = match (family, &rec.address.ip) {
-                (Family::V4, std::net::IpAddr::V4(_)) => true,
-                (Family::V6, std::net::IpAddr::V6(_)) => true,
-                _ => false,
-            };
+            let ok = matches!(
+                (family, &rec.address.ip),
+                (Family::V4, std::net::IpAddr::V4(_)) | (Family::V6, std::net::IpAddr::V6(_))
+            );
             if !ok {
                 return false;
             }
         }
-        if let Some(min) = self.min_protocol_version {
-            if rec.protocol_version < min {
-                return false;
-            }
+        if let Some(min) = self.min_protocol_version
+            && rec.protocol_version < min
+        {
+            return false;
         }
         if let Some(min) = self.min_user_agent.as_ref() {
             match PeerRecord::parse_kaspad_version(&rec.user_agent) {
@@ -59,12 +58,11 @@ impl Filter {
                 _ => return false,
             }
         }
-        if let Some(port) = self.default_port {
-            if rec.address.port != port {
-                return false;
-            }
+        if let Some(port) = self.default_port
+            && rec.address.port != port
+        {
+            return false;
         }
-        let _ = NetAddress { ip: rec.address.ip, port: rec.address.port }; // type witness
         true
     }
 }

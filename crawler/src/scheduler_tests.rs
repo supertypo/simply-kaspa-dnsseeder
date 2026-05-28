@@ -87,7 +87,6 @@ mod probe_one_fanout {
     use crate::scheduler::Scheduler;
 
     const DEFAULT_PORT: u16 = 16111;
-    const DEAD_AFTER_MS: i64 = 3_600_000;
 
     struct FanoutProbe {
         addresses: Vec<(IpAddress, u16)>,
@@ -128,7 +127,7 @@ mod probe_one_fanout {
         (dir, store)
     }
 
-    async fn drain(rx: &mut mpsc::Receiver<SocketAddr>) -> Vec<SocketAddr> {
+    fn drain(rx: &mut mpsc::Receiver<SocketAddr>) -> Vec<SocketAddr> {
         let mut out = Vec::new();
         while let Ok(addr) = rx.try_recv() {
             out.push(addr);
@@ -150,9 +149,9 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, DEAD_AFTER_MS).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
 
-        let enqueued = drain(&mut rx).await;
+        let enqueued = drain(&mut rx);
         assert_eq!(enqueued.len(), 2);
         assert!(enqueued.contains(&"8.8.8.8:16111".parse().unwrap()));
         assert!(enqueued.contains(&"1.1.1.1:16222".parse().unwrap()));
@@ -167,9 +166,9 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, DEAD_AFTER_MS).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
 
-        let enqueued = drain(&mut rx).await;
+        let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4)), DEFAULT_PORT)]);
     }
 
@@ -191,9 +190,9 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, DEAD_AFTER_MS).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
 
-        let enqueued = drain(&mut rx).await;
+        let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec!["8.8.8.8:16111".parse().unwrap()]);
     }
 
@@ -212,9 +211,9 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, DEAD_AFTER_MS).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
 
-        let enqueued = drain(&mut rx).await;
+        let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec!["8.8.8.8:16111".parse().unwrap()]);
     }
 
@@ -231,9 +230,9 @@ mod probe_one_fanout {
         // Pretend 8.8.8.8 is already being crawled.
         in_flight.insert("8.8.8.8:16111".parse().unwrap());
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, DEAD_AFTER_MS).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
 
-        let enqueued = drain(&mut rx).await;
+        let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec!["1.1.1.1:16111".parse().unwrap()]);
     }
 
@@ -252,7 +251,7 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, DEAD_AFTER_MS).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
 
         // Only the first one made it into tx; the second was rolled back.
         let first = rx.try_recv().unwrap();
@@ -276,9 +275,9 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, DEAD_AFTER_MS).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
 
-        let enqueued = drain(&mut rx).await;
+        let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec!["8.8.8.8:16111".parse::<SocketAddr>().unwrap()]);
     }
 }

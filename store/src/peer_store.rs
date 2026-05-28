@@ -23,10 +23,10 @@ pub struct PeerStore {
 
 impl PeerStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
-        if let Some(parent) = path.as_ref().parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if let Some(parent) = path.as_ref().parent()
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent)?;
         }
         let db = Database::create(path.as_ref())?;
         let txn = db.begin_write()?;
@@ -196,10 +196,11 @@ impl PeerStore {
             let t = txn.open_table(PEERS)?;
             for entry in t.iter()? {
                 let (k, v) = entry?;
-                if let Ok(rec) = decode_record(v.value()) {
-                    if rec.last_seen_ms < cutoff_ms && rec.first_seen_ms < cutoff_ms {
-                        to_delete.push(k.value().to_vec());
-                    }
+                if let Ok(rec) = decode_record(v.value())
+                    && rec.last_seen_ms < cutoff_ms
+                    && rec.first_seen_ms < cutoff_ms
+                {
+                    to_delete.push(k.value().to_vec());
                 }
             }
         }

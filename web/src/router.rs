@@ -13,7 +13,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use log::{debug, warn};
 use serde_json::json;
-use simply_kaspa_dnsseeder_store::{Filter, PeerRecord};
+use simply_kaspa_dnsseeder_store::{Filter, NetAddress};
 
 use crate::dto::PeerDto;
 use crate::state::AppState;
@@ -21,13 +21,12 @@ use crate::state::AppState;
 const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
-#[must_use]
 pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/ping", get(ping))
         .route("/health", get(health))
         .route("/peers", get(list_peers).post(submit_peer))
-        .route("/peers/{id}", get(get_peer))
+        .route("/peers/{addr}", get(get_peer))
         .with_state(state)
 }
 
@@ -68,30 +67,29 @@ async fn list_peers(State(state): State<AppState>, headers: HeaderMap) -> Respon
     Json(dtos).into_response()
 }
 
-async fn get_peer(State(state): State<AppState>, Path(id_hex): Path<String>, headers: HeaderMap) -> Response {
-    let Ok(bytes) = hex::decode(&id_hex) else {
-        return (StatusCode::BAD_REQUEST, "id must be hex").into_response();
+async fn get_peer(State(state): State<AppState>, Path(addr_str): Path<String>, headers: HeaderMap) -> Response {
+    let addr = match SocketAddr::from_str(&addr_str) {
+        Ok(a) => a,
+        Err(err) => return (StatusCode::BAD_REQUEST, format!("addr must be ip:port — {err}")).into_response(),
     };
-    if bytes.len() != 16 {
-        return (StatusCode::BAD_REQUEST, "id must be 16 bytes").into_response();
-    }
-    let mut id = [0u8; 16];
-    id.copy_from_slice(&bytes);
-    // Store is keyed by address now; scan iter_all for a matching id. This
-    // endpoint is exposed for ops debugging, not heavy traffic.
-    let rec = match state.store.iter_all() {
-        Ok(records) => records.into_iter().find(|r| r.id == id),
-        Err(err) => {
-            warn!("/peers/{{id}} store error: {err}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response();
-        }
-    };
-    match rec {
-        Some(rec) => {
+    let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+    match state.store.get(&net) {
+        Ok(Some(rec)) => {
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
             Json(PeerDto::from_record(&rec, expose)).into_response()
         }
-        None => (StatusCode::NOT_FOUND, "peer not found").into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
+        Err(err) => {
+            warn!("/peers/{{addr}} store error: {err}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response()
+        }
+    }
+}
+
+fn canonicalize_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(v6) => v6.to_canonical(),
+        IpAddr::V4(_) => ip,
     }
 }
 
@@ -147,12 +145,11 @@ fn expose_ip(headers: &HeaderMap, api_key: Option<&str>) -> bool {
 }
 
 fn client_ip(headers: &HeaderMap, fallback: SocketAddr) -> IpAddr {
-    if let Some(raw) = headers.get(&X_FORWARDED_FOR).and_then(|v| v.to_str().ok()) {
-        if let Some(first) = raw.split(',').next() {
-            if let Ok(ip) = IpAddr::from_str(first.trim()) {
-                return ip;
-            }
-        }
+    if let Some(raw) = headers.get(&X_FORWARDED_FOR).and_then(|v| v.to_str().ok())
+        && let Some(first) = raw.split(',').next()
+        && let Ok(ip) = IpAddr::from_str(first.trim())
+    {
+        return ip;
     }
     fallback.ip()
 }
@@ -162,7 +159,3 @@ fn now_ms() -> i64 {
     let dur = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     i64::try_from(dur.as_millis()).unwrap_or(i64::MAX)
 }
-
-// Helper kept to surface PeerRecord types in tests without unused imports.
-#[allow(dead_code)]
-fn _phantom(_: PeerRecord) {}

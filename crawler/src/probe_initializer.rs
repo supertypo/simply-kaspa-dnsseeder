@@ -92,7 +92,7 @@ impl ProbeInitializer {
         let our_version = pb::VersionMessage {
             protocol_version: peer_version.protocol_version,
             services: peer_version.services,
-            timestamp: unix_now() as i64,
+            timestamp: i64::try_from(unix_now()).unwrap_or(i64::MAX),
             address: None,
             id: Vec::from(Uuid::new_v4().as_bytes()),
             user_agent: USER_AGENT.to_string(),
