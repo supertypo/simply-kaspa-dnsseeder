@@ -53,7 +53,9 @@ impl PeerStore {
         T: Send + 'static,
     {
         let store = self.clone();
-        tokio::task::spawn_blocking(move || f(&store)).await.expect("PeerStore::blocking task panicked")
+        tokio::task::spawn_blocking(move || f(&store))
+            .await
+            .expect("PeerStore::blocking task panicked")
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {

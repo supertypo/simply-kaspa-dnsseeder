@@ -25,7 +25,10 @@ pub struct PeersCache {
 impl PeersCache {
     #[must_use]
     pub fn new(ttl: Duration) -> Self {
-        Self { ttl, entries: Mutex::new(Vec::new()) }
+        Self {
+            ttl,
+            entries: Mutex::new(Vec::new()),
+        }
     }
 
     pub fn get(&self, key: Key) -> Option<Bytes> {
@@ -38,6 +41,10 @@ impl PeersCache {
     pub fn put(&self, key: Key, body: Bytes) {
         let mut guard = self.entries.lock().expect("peers_cache poisoned");
         guard.retain(|e| e.key != key);
-        guard.push(Entry { key, body, inserted: Instant::now() });
+        guard.push(Entry {
+            key,
+            body,
+            inserted: Instant::now(),
+        });
     }
 }

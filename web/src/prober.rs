@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 
 use async_trait::async_trait;
-use simply_kaspa_dnsseeder_crawler::{KaspadProbe, Probe, ProbeError, Scheduler};
+use simply_kaspa_dnsseeder_crawler::{KaspadProbe, Probe, ProbeError, probe_and_store};
 use simply_kaspa_dnsseeder_store::{PeerRecord, PeerStore};
 
 #[async_trait]
@@ -28,6 +28,6 @@ impl SchedulerProber {
 #[async_trait]
 impl Prober for SchedulerProber {
     async fn probe(&self, addr: SocketAddr) -> Result<PeerRecord, ProbeError> {
-        Scheduler::probe_and_store(self.probe.as_ref() as &dyn Probe, &self.store, addr).await
+        probe_and_store(self.probe.as_ref() as &dyn Probe, &self.store, addr).await
     }
 }
