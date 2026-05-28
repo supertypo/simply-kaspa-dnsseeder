@@ -176,7 +176,7 @@ impl Scheduler {
         for host in &self.config.seeders {
             match self.resolver.lookup(host, port).await {
                 Ok(list) => out.extend(list),
-                Err(err) => warn!("--seeder {host} failed: {err}"),
+                Err(err) => warn!("crawler: --seeder {host} failed: {err}"),
             }
         }
         out

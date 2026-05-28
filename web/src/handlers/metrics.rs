@@ -19,7 +19,7 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
     let summary = match state.store.summary(now, stale_good_ms) {
         Ok(s) => s,
         Err(err) => {
-            warn!("/metrics store error: {err}");
+            warn!("web: GET /metrics store error: {err}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response();
         }
     };

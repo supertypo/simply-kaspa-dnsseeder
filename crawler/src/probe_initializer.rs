@@ -74,7 +74,7 @@ impl ProbeInitializer {
         // 1. Peer pushes its Version unprompted on connect.
         let peer_version: VersionMessage = dequeue_with_timeout!(version_route, Payload::Version, timeout)?;
         debug!(
-            "probe {}: peer version protocol={} ua={:?} network={}",
+            "crawler: probe {}: peer version protocol={} ua={:?} network={}",
             router.net_address(),
             peer_version.protocol_version,
             peer_version.user_agent,
@@ -137,8 +137,8 @@ impl ProbeInitializer {
                 address_list.len(),
             )));
         }
-        info!("probe {}: received {} address(es)", router.net_address(), address_list.len());
-        trace!("probe {}: addresses = {:?}", router.net_address(), address_list);
+        info!("crawler: probe {}: received {} address(es)", router.net_address(), address_list.len());
+        trace!("crawler: probe {}: addresses = {:?}", router.net_address(), address_list);
 
         Ok(ProbeResult { version: peer_version, addresses: address_list })
     }
@@ -172,7 +172,7 @@ impl ConnectionInitializer for ProbeInitializer {
                     };
                     let _ = tx.send(Err(probe_err));
                 }
-                warn!("probe {addr}: failed during initializer: {err}");
+                warn!("crawler: probe {addr}: failed during initializer: {err}");
                 Err(err)
             }
         }

@@ -20,7 +20,7 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
     let summary = match state.store.summary(now, stale_good_ms) {
         Ok(s) => s,
         Err(err) => {
-            warn!("/health store error: {err}");
+            warn!("web: GET /health store error: {err}");
             return (
                 StatusCode::SERVICE_UNAVAILABLE,
                 Json(json!({"status": "down", "reason": "store error"})),

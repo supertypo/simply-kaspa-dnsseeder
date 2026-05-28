@@ -59,7 +59,7 @@ impl Probe for KaspadProbe {
             }
             Err(_) => {
                 self.pending.remove(&addr);
-                warn!("probe {addr}: connect timeout");
+                warn!("crawler: probe {addr}: connect timeout");
                 return Err(ProbeError::Timeout);
             }
         };
@@ -82,7 +82,7 @@ impl Probe for KaspadProbe {
             }
             Err(_) => {
                 self.pending.remove(&addr);
-                warn!("probe {addr}: overall timeout, dropping pending entry");
+                warn!("crawler: probe {addr}: overall timeout, dropping pending entry");
                 Err(ProbeError::Timeout)
             }
         }

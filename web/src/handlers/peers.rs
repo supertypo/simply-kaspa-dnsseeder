@@ -34,7 +34,7 @@ pub(crate) async fn list(State(state): State<AppState>, headers: HeaderMap) -> R
     let mut records = match state.store.collect_matching(&filter) {
         Ok(v) => v,
         Err(err) => {
-            warn!("/peers store error: {err}");
+            warn!("web: GET /peers store error: {err}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response();
         }
     };
@@ -63,7 +63,7 @@ pub(crate) async fn get(
         }
         Ok(None) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
         Err(err) => {
-            warn!("/peers/{{addr}} store error: {err}");
+            warn!("web: GET /peers/<addr> store error: {err}");
             (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response()
         }
     }

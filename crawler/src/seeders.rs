@@ -34,7 +34,7 @@ pub async fn dns_seed_many<R: Resolver + ?Sized + 'static>(network_id: NetworkId
     let seeders: Vec<&'static str> = params.dns_seeders.to_vec();
 
     if seeders.is_empty() {
-        warn!("no dns seeders configured for network {network_id}");
+        warn!("crawler: no dns seeders configured for network {network_id}");
         return Vec::new();
     }
 
@@ -44,11 +44,11 @@ pub async fn dns_seed_many<R: Resolver + ?Sized + 'static>(network_id: NetworkId
         joins.spawn(async move {
             match resolver.lookup(host, port).await {
                 Ok(list) => {
-                    info!("dns seeder {host} resolved to {} address(es)", list.len());
+                    info!("crawler: dns seeder {host} resolved to {} address(es)", list.len());
                     list
                 }
                 Err(err) => {
-                    warn!("dns seeder {host} failed: {err}");
+                    warn!("crawler: dns seeder {host} failed: {err}");
                     Vec::new()
                 }
             }
@@ -59,7 +59,7 @@ pub async fn dns_seed_many<R: Resolver + ?Sized + 'static>(network_id: NetworkId
     while let Some(res) = joins.join_next().await {
         match res {
             Ok(v) => out.extend(v),
-            Err(err) => warn!("dns seeder join error: {err}"),
+            Err(err) => warn!("crawler: dns seeder join error: {err}"),
         }
     }
     out
