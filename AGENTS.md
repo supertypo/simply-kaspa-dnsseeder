@@ -11,7 +11,7 @@ Workspace layout (just so the names map cleanly): `cli` (clap args), `store` (re
 Three cooperating loops driven from one binary:
 
 1. **Crawler** (`crawler::Scheduler`) — periodic ticker drains eligible peers from the store, dispatches bounded-concurrency probes, persists results.
-2. **DNS server** (`dns::SeederHandler`) — answers `A` / `AAAA` / `NS` / `SOA` from the same store, filtered for freshness and quality.
+2. **DNS server** (`dns::SeederHandler`) — answers `A` / `AAAA` / `NS` / `SOA` from a small in-memory `ServingCache` periodically rebuilt from the store; the handler itself never touches redb on the request path.
 3. **HTTP API** (`web`) — `axum` router under a configurable `--api-prefix` (default `/api`): `/ping`, `/health`, `/metrics`, `/peers` (GET/POST), `/peers/{ip:port}`. Handlers live in `web/src/handlers/{health,metrics,peers}.rs`; routing in `router.rs`; sysinfo collection in `system.rs`; tiny helpers in `util.rs`.
 
 A fourth task — `dnsseeder::stats::stats_loop` — emits a single info-level stats block on `--stats-interval` (default `1m`, `0s` disables) and persists cumulative counters to the store so totals survive restarts.
@@ -30,11 +30,17 @@ A "stub" record has `last_success_ms = 0` and `last_attempt_ms = 0`. The DNS fil
 
 ### Two-tier eligibility (matches Go dnsseeder's `isGood`)
 `store::is_eligible_for_probe` decides what to re-probe:
-- Past the dead cutoff (`dead_after`, default 24h since last contact): **never** — `prune_dead` will eventually delete it.
-- Succeeded at least once: re-probe every `stale_good` (default **15 min**).
-- Never succeeded (stub or repeated failures): re-probe every `stale_bad` (default **2 h**).
+- Past the dead cutoff (`--dead-after`): **never** — `prune_dead` will eventually delete it.
+- Succeeded at least once: re-probe every `--stale-good`.
+- Never succeeded (stub or repeated failures): re-probe every `--stale-bad`.
 
-The DNS handler uses the same `stale_good` window as a filter on `last_success_ms` — so DNS only ever returns peers we've verifiably reached within the last 15 min. Stubs (last_success_ms = 0) are filtered out automatically because `now - 0` is always greater than the window.
+The DNS filter uses the same `stale_good` window on `last_success_ms` — so DNS only ever returns peers we've verifiably reached recently. Stubs (`last_success_ms = 0`) are filtered out automatically because `now - 0` always exceeds the window.
+
+### Multi-round address harvesting
+Each successful probe issues `--probes-per-peer` back-to-back `RequestAddresses` rounds (capped 1..=10, separated by `PROBE_REPEAT_DELAY`) and unions the responses through a `HashSet` with early-exit on no new addresses or the `MAX_ADDRESSES_RECEIVE` ceiling. This matches Go's behaviour of milking each healthy connection for more peer addresses before closing it. Logic lives in `crawler::probe_initializer::collect_addresses`.
+
+### DNS serving cache
+The DNS request path never queries redb. `dns::ServingCache` holds an `Arc<Snapshot>` of per-family `Box<[IpAddr]>` lists chosen by `last_success_ms` (top `max_records * SNAPSHOT_MULTIPLIER`), rebuilt every `REFRESH_INTERVAL` by a background task (`dns::build_serving_cache`) using `spawn_blocking` for the redb scan. Each query takes a lock long enough to clone the `Arc`, then samples without further synchronization. Per-record TTLs are subsystem constants in `dns/src/handler.rs` (`A_TTL_SECONDS`, `NS_TTL_SECONDS`) and mirror the Go seeder's per-type values.
 
 ### Shutdown responsiveness
 `Scheduler::run` selects on a `broadcast::Receiver<()>` plus two tickers. The dispatch path inside `enqueue_probes` **must stay non-blocking** — each probe acquires its own semaphore permit *inside* its spawned task, not in the dispatch loop. If you ever move `semaphore.acquire().await` back into the loop, a saturated worker pool will delay Ctrl+C by up to one full probe-timeout window. The signal handler in `main.rs` arms a one-shot graceful shutdown and force-exits on the second signal.
@@ -62,7 +68,7 @@ Every log line starts with the *owning* subsystem (`crawler:`, `dns:`, `web:`, `
 - Edition 2024. `cargo clippy --workspace --all-targets -- -D warnings` must pass; CI mirrors this.
 - Tests live in sibling `*_tests.rs` files (e.g. `peer_store.rs` ↔ `peer_store_tests.rs`), not inline `#[cfg(test)] mod tests`.
 - JSON over the HTTP API: always `serde(rename_all = "camelCase")`.
-- CLI durations: parsed with `humantime` (`--probe-tick 10s`, `--stale-good 15m`, `--stats-interval 1m`).
+- CLI durations: parsed with `humantime` (`--probe-tick 10s`, `--stale-good 30m`, `--stats-interval 1m`).
 - Never run `cargo clean` — the rusty-kaspa git deps are expensive to rebuild.
 - Comments: only when the *why* is non-obvious. The code is the *what*. No step-by-step narration, no task/PR references, no "added for X" history.
 - One responsibility per file. Split when a module starts mixing concerns (the `web::handlers/` and `dnsseeder::stats/` splits are the templates).

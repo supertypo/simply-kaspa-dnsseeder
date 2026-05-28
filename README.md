@@ -72,8 +72,9 @@ simply-kaspa-dnsseeder \
 | Flag | Default | Purpose |
 | --- | --- | --- |
 | `--threads` | `8` | Concurrent probe workers |
+| `--probes-per-peer` | `3` | Back-to-back `RequestAddresses` rounds per healthy probe (1..=10) |
 | `--probe-tick` | `10s` | How often the crawler scans for eligible peers |
-| `--stale-good` | `15m` | Re-probe interval for known-good peers (and DNS freshness window) |
+| `--stale-good` | `30m` | Re-probe interval for known-good peers (and DNS freshness window) |
 | `--stale-bad` | `2h` | Re-probe interval for peers that have never succeeded |
 | `--dead-after` | `7d` | Peers not seen for this long are pruned |
 | `--min-protocol-version` | _unset_ | Filter DNS answers by minimum protocol version |
