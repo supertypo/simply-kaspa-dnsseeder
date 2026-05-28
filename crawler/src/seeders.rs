@@ -1,12 +1,17 @@
 //! DNS bootstrap: parallel resolution of the built-in `Params::dns_seeders` list.
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use kaspa_consensus_core::config::params::Params;
 use kaspa_consensus_core::network::NetworkId;
 use log::{info, warn};
 use tokio::task::JoinSet;
+
+/// Per-seeder DNS lookup timeout. Without this, a single non-responsive
+/// upstream resolver hangs bootstrap and blocks the scheduler from starting.
+const LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Abstract DNS lookup so tests can run offline.
 #[async_trait]
@@ -25,8 +30,8 @@ impl Resolver for TokioResolver {
     }
 }
 
-/// Resolve all configured DNS seeders in parallel. Per-seeder failures are
-/// logged but don't abort bootstrap.
+/// Resolve all configured DNS seeders in parallel. Per-seeder failures and
+/// timeouts are logged but don't abort bootstrap.
 pub async fn dns_seed_many<R: Resolver + ?Sized + 'static>(network_id: NetworkId, resolver: std::sync::Arc<R>) -> Vec<SocketAddr> {
     let params: Params = network_id.into();
     let port = network_id.default_p2p_port();
@@ -41,13 +46,17 @@ pub async fn dns_seed_many<R: Resolver + ?Sized + 'static>(network_id: NetworkId
     for host in seeders {
         let resolver = resolver.clone();
         joins.spawn(async move {
-            match resolver.lookup(host, port).await {
-                Ok(list) => {
+            match tokio::time::timeout(LOOKUP_TIMEOUT, resolver.lookup(host, port)).await {
+                Ok(Ok(list)) => {
                     info!("crawler: dns seeder {host} resolved to {} address(es)", list.len());
                     list
                 }
-                Err(err) => {
+                Ok(Err(err)) => {
                     warn!("crawler: dns seeder {host} failed: {err}");
+                    Vec::new()
+                }
+                Err(_) => {
+                    warn!("crawler: dns seeder {host} timed out after {LOOKUP_TIMEOUT:?}");
                     Vec::new()
                 }
             }

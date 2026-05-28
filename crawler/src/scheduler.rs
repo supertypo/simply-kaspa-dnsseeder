@@ -30,6 +30,9 @@ pub(crate) const BATCH_PER_THREAD: usize = 10;
 pub(crate) const MAX_IN_FLIGHT_PER_THREAD: usize = 10;
 /// Pruning runs on this fixed cadence (matches Go dnsseeder).
 const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
+/// Per-host timeout for `--seeder` lookups. Mirrors the built-in DNS-seeder
+/// timeout so a single dead host can't stall bootstrap indefinitely.
+const SEEDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Static configuration for the scheduler.
 #[derive(Debug, Clone)]
@@ -157,12 +160,9 @@ impl Scheduler {
     }
 
     async fn bootstrap(&self) -> Result<(), Error> {
-        let store_empty = self.store.is_empty()?;
-        if !store_empty {
-            debug!("crawler: store non-empty, skipping DNS bootstrap");
-            return Ok(());
-        }
-
+        // Always run bootstrap: `insert_stub_if_missing` is idempotent, and
+        // re-running recovers from a previous startup that only managed to
+        // insert a few stubs before being interrupted (e.g. resolver hang).
         let bootstrap_addrs = if self.config.seeders.is_empty() {
             info!(
                 "crawler: bootstrapping from built-in dns seeders for network {}",
@@ -202,9 +202,10 @@ impl Scheduler {
         let port = self.config.network_id.default_p2p_port();
         let mut out = Vec::new();
         for host in &self.config.seeders {
-            match self.resolver.lookup(host, port).await {
-                Ok(list) => out.extend(list),
-                Err(err) => warn!("crawler: --seeder {host} failed: {err}"),
+            match tokio::time::timeout(SEEDER_LOOKUP_TIMEOUT, self.resolver.lookup(host, port)).await {
+                Ok(Ok(list)) => out.extend(list),
+                Ok(Err(err)) => warn!("crawler: --seeder {host} failed: {err}"),
+                Err(_) => warn!("crawler: --seeder {host} timed out after {SEEDER_LOOKUP_TIMEOUT:?}"),
             }
         }
         out
