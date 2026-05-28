@@ -310,7 +310,9 @@ impl PeerStore {
             let (_attempt, values) = entry?;
             for v in values {
                 let addr_bytes = v?;
-                let Some(rec_bytes) = peers.get(addr_bytes.value())? else { continue };
+                let Some(rec_bytes) = peers.get(addr_bytes.value())? else {
+                    continue;
+                };
                 let Ok(rec) = decode_record(rec_bytes.value()) else { continue };
                 if !is_eligible_for_probe(&rec, now_ms, stale_good_ms, stale_bad_ms, dead_cutoff_ms) {
                     continue;
@@ -428,13 +430,7 @@ fn encode_key(addr: &NetAddress) -> Result<Vec<u8>, Error> {
 /// scheduler-side unit tests; production code reaches it through
 /// `due_for_probe` rather than calling it directly.
 #[must_use]
-pub fn is_eligible_for_probe(
-    rec: &PeerRecord,
-    now_ms: i64,
-    stale_good_ms: i64,
-    stale_bad_ms: i64,
-    dead_cutoff_ms: i64,
-) -> bool {
+pub fn is_eligible_for_probe(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, stale_bad_ms: i64, dead_cutoff_ms: i64) -> bool {
     if rec.last_seen_ms < dead_cutoff_ms && rec.first_seen_ms < dead_cutoff_ms {
         return false;
     }

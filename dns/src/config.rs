@@ -7,7 +7,7 @@ use semver::Version;
 #[derive(Debug, Clone)]
 pub struct DnsConfig {
     pub network_id: NetworkId,
-    pub dns_listen: SocketAddr,
+    pub dns_listen: Vec<SocketAddr>,
     pub dns_zone: String,
     pub nameserver: String,
     pub max_records: usize,
@@ -25,7 +25,7 @@ pub struct DnsConfig {
 
 impl DnsConfig {
     #[must_use]
-    pub fn new(network_id: NetworkId, dns_listen: SocketAddr, dns_zone: String, nameserver: String) -> Self {
+    pub fn new(network_id: NetworkId, dns_listen: Vec<SocketAddr>, dns_zone: String, nameserver: String) -> Self {
         Self {
             network_id,
             dns_listen,

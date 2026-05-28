@@ -51,11 +51,7 @@ pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {
     "pong"
 }
 
-pub(crate) async fn list(
-    State(state): State<AppState>,
-    Query(q): Query<ListQuery>,
-    headers: HeaderMap,
-) -> Response {
+pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>, headers: HeaderMap) -> Response {
     state.metrics.record_request();
     let filter = list_filter(&state.config, q.all);
     let mut records = match state.store.collect_matching(&filter) {
@@ -155,11 +151,7 @@ pub(crate) async fn submit(
             state.metrics.record_accepted();
             debug!("web: POST /peers accepted {addr} (probe ok)");
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
-            (
-                StatusCode::OK,
-                Json(PeerDto::from_record(&rec, expose)),
-            )
-                .into_response()
+            (StatusCode::OK, Json(PeerDto::from_record(&rec, expose))).into_response()
         }
         Err(err) => {
             state.metrics.record_rejected();

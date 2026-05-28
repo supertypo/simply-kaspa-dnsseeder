@@ -1,5 +1,6 @@
 use clap::Parser;
 use semver::Version;
+use std::net::SocketAddr;
 use std::time::Duration;
 
 /// Command-line configuration for the dnsseeder.
@@ -65,9 +66,11 @@ pub struct CliArgs {
     #[clap(long)]
     pub dns_nameserver: Option<String>,
 
-    /// DNS server bind address.
-    #[clap(long, default_value = "0.0.0.0:53")]
-    pub dns_listen: String,
+    /// DNS server bind addresses (comma-separated). Defaults to dual-stack;
+    /// addresses whose address family is unavailable on this host are skipped
+    /// with a warning as long as at least one bind succeeds.
+    #[clap(long, default_value = "0.0.0.0:53,[::]:53", value_delimiter = ',', num_args = 1..)]
+    pub dns_listen: Vec<SocketAddr>,
 
     /// HTTP server bind address.
     #[clap(long, default_value = "127.0.0.1:8080")]

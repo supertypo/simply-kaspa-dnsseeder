@@ -312,7 +312,10 @@ mod probe_one_fanout {
 
         // bump_attempt should have created (or touched) the record with
         // last_attempt_ms > 0 and last_success_ms == 0.
-        let rec = store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111)).unwrap().expect("attempt creates record");
+        let rec = store
+            .get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111))
+            .unwrap()
+            .expect("attempt creates record");
         assert!(rec.last_attempt_ms > 0, "bump_attempt should have set last_attempt_ms");
         assert_eq!(rec.last_success_ms, 0, "failure must not record success");
     }

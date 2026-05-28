@@ -23,7 +23,7 @@ fn defaults_match_spec() {
     assert_eq!(cli.stale_good, Duration::from_secs(15 * 60));
     assert_eq!(cli.stale_bad, Duration::from_secs(2 * 60 * 60));
     assert_eq!(cli.dead_after, Duration::from_secs(7 * 24 * 60 * 60));
-    assert_eq!(cli.dns_listen, "0.0.0.0:53");
+    assert_eq!(cli.dns_listen, vec!["0.0.0.0:53".parse().unwrap(), "[::]:53".parse().unwrap()]);
     assert_eq!(cli.http_listen, "127.0.0.1:8080");
     assert_eq!(cli.post_rate_limit, 5);
     assert_eq!(cli.rate_limit_window, Duration::from_secs(60));

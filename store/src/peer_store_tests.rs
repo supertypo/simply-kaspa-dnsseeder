@@ -284,7 +284,10 @@ fn due_for_probe_filters_bad_class_within_stale_bad_window() {
 #[test]
 fn record_attempt_updates_index_position() {
     let (_dir, store) = open_temp_store();
-    let net = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)), port: 16111 };
+    let net = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),
+        port: 16111,
+    };
     // Initial insert via record_attempt at t=0.
     store.record_attempt(&net, 0).unwrap();
     // Promote to good class so future eligibility is based on stale_good only.
@@ -304,7 +307,10 @@ fn record_attempt_updates_index_position() {
 #[test]
 fn delete_removes_attempt_index_entry() {
     let (_dir, store) = open_temp_store();
-    let net = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), port: 16111 };
+    let net = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
+        port: 16111,
+    };
     store.insert_stub_if_missing(&net, 0).unwrap();
     // Stub has last_attempt_ms=0 and is bad-class → eligible when since_attempt ≥ stale_bad.
     let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();

@@ -19,9 +19,9 @@ use tokio::sync::{Semaphore, broadcast};
 use crate::error::Error;
 use crate::metrics::CrawlerMetrics;
 use crate::model::{ProbeResult, is_acceptable_address, peer_record_from_version};
-use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
 use crate::probe::Probe;
 use crate::seeders::{Resolver, dns_seed_many};
+use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
 
 /// Max probes dispatched per tick per thread.
 pub(crate) const BATCH_PER_THREAD: usize = 10;
@@ -160,9 +160,7 @@ impl Scheduler {
     }
 
     async fn bootstrap(&self) -> Result<(), Error> {
-        // Always run bootstrap: `insert_stub_if_missing` is idempotent, and
-        // re-running recovers from a previous startup that only managed to
-        // insert a few stubs before being interrupted (e.g. resolver hang).
+        // Idempotent: re-running recovers from a previous interrupted bootstrap that only inserted some stubs.
         let bootstrap_addrs = if self.config.seeders.is_empty() {
             info!(
                 "crawler: bootstrapping from built-in dns seeders for network {}",
@@ -236,7 +234,9 @@ impl Scheduler {
         // Overfetch to absorb records filtered by `in_flight` / `strict_port` /
         // private-IP guards without doing another index walk.
         let fetch_target = batch_max.saturating_mul(2).max(batch_max);
-        let candidates = self.store.due_for_probe(now, stale_good_ms, stale_bad_ms, dead_cutoff, fetch_target)?;
+        let candidates = self
+            .store
+            .due_for_probe(now, stale_good_ms, stale_bad_ms, dead_cutoff, fetch_target)?;
         let scanned = candidates.len();
         let mut selected: Vec<NetAddress> = Vec::with_capacity(batch_max);
         for rec in candidates {
@@ -289,8 +289,19 @@ impl Scheduler {
                         self.in_flight.remove(&self.addr);
                     }
                 }
-                let ProbeTaskCtx { probe, store, in_flight, semaphore, metrics } = ctx;
-                let mut guard = InFlightGuard { addr, in_flight, metrics: metrics.clone(), armed: false };
+                let ProbeTaskCtx {
+                    probe,
+                    store,
+                    in_flight,
+                    semaphore,
+                    metrics,
+                } = ctx;
+                let mut guard = InFlightGuard {
+                    addr,
+                    in_flight,
+                    metrics: metrics.clone(),
+                    armed: false,
+                };
                 let Ok(_permit) = semaphore.acquire_owned().await else {
                     return;
                 };

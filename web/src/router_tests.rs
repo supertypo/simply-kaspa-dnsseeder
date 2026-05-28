@@ -313,14 +313,7 @@ async fn list_peers_uses_camel_case_keys() {
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let entry = &json[0];
-    for key in [
-        "protocolVersion",
-        "userAgent",
-        "lastSeenMs",
-        "firstSeenMs",
-        "ip",
-        "port",
-    ] {
+    for key in ["protocolVersion", "userAgent", "lastSeenMs", "firstSeenMs", "ip", "port"] {
         assert!(entry.get(key).is_some(), "missing camelCase field `{key}` in {entry}");
     }
     assert!(
@@ -404,7 +397,11 @@ async fn list_peers_applies_protocol_version_filter_unless_all() {
         .unwrap();
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json.as_array().unwrap().len(), 1, "?all=true returns the peer regardless of protocol_version");
+    assert_eq!(
+        json.as_array().unwrap().len(),
+        1,
+        "?all=true returns the peer regardless of protocol_version"
+    );
 }
 
 #[tokio::test]
@@ -412,18 +409,17 @@ async fn list_peers_hides_stubs_in_both_modes() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     // A stub: last_success_ms = 0 → fails the freshness gate.
-    let net = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), port: 16111 };
+    let net = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+        port: 16111,
+    };
     store.insert_stub_if_missing(&net, 0).unwrap();
 
     let state = make_state(Arc::new(MockProber::default()), store, None);
     let app = build_router(state);
 
     for url in ["/peers", "/peers?all=true"] {
-        let res = app
-            .clone()
-            .oneshot(Request::get(url).body(Body::empty()).unwrap())
-            .await
-            .unwrap();
+        let res = app.clone().oneshot(Request::get(url).body(Body::empty()).unwrap()).await.unwrap();
         let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json.as_array().unwrap().len(), 0, "stubs must never appear (url={url})");

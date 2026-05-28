@@ -55,7 +55,7 @@ fn make_record(id: u8, ip: IpAddr, now_ms: i64) -> PeerRecord {
 /// so behavior under test is not coupled to production defaults. Each test
 /// further overrides only the fields it exercises.
 fn baseline_cfg(listen: SocketAddr) -> DnsConfig {
-    let mut cfg = DnsConfig::new(NetworkId::new(NetworkType::Mainnet), listen, APEX.to_string(), NS.to_string());
+    let mut cfg = DnsConfig::new(NetworkId::new(NetworkType::Mainnet), vec![listen], APEX.to_string(), NS.to_string());
     cfg.queries_per_ip_per_second = 0;
     cfg.max_records = 1024;
     cfg
@@ -407,7 +407,7 @@ async fn response_fits_in_udp_mtu() {
     }
     let prod_defaults = DnsConfig::new(
         NetworkId::new(NetworkType::Mainnet),
-        "127.0.0.1:0".parse().unwrap(),
+        vec!["127.0.0.1:0".parse().unwrap()],
         APEX.to_string(),
         NS.to_string(),
     );

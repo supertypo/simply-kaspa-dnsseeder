@@ -23,6 +23,7 @@ async-trait.workspace = true
 log.workspace = true
 thiserror.workspace = true
 rand.workspace = true
+socket2.workspace = true
 dashmap.workspace = true
 semver.workspace = true
 

@@ -6,7 +6,8 @@ use dashmap::DashMap;
 use kaspa_core::time::unix_now;
 use kaspa_p2p_lib::common::ProtocolError;
 use kaspa_p2p_lib::pb::{
-    self, AddressesMessage, ReadyMessage, RequestAddressesMessage, VerackMessage, VersionMessage, kaspad_message::Payload,
+    self, AddressesMessage, ReadyMessage, RejectMessage, RequestAddressesMessage, VerackMessage, VersionMessage,
+    kaspad_message::Payload,
 };
 use kaspa_p2p_lib::{ConnectionInitializer, IncomingRoute, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message};
 use kaspa_utils::networking::{IpAddress, PeerId};
@@ -133,11 +134,18 @@ impl ProbeInitializer {
         );
         trace!("crawler: probe {}: addresses = {:?}", router.net_address(), address_list);
 
-        // Keep all route receivers alive until the router shuts down. If they
-        // were dropped here, any further inbound message would hit a closed
-        // channel and the upstream router would log a misleading
-        // "P2P, route error: peer connection is closed" warning. The drain
-        // task exits naturally when `Adaptor::terminate` closes the senders.
+        // Pre-empt the peer's 120s PingFlow timeout; `DUPLICATE_CONNECTION` is mapped to `IgnorableReject` on the remote.
+        router
+            .enqueue(make_message!(
+                Payload::Reject,
+                RejectMessage {
+                    reason: "DUPLICATE_CONNECTION".to_string()
+                }
+            ))
+            .await
+            .ok();
+
+        // Bridge the close-handshake race window so late inbound messages don't hit a dropped route channel.
         spawn_route_drain(vec![
             version_route,
             verack_route,

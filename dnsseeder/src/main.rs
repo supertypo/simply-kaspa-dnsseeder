@@ -78,17 +78,14 @@ async fn run(cli: CliArgs) -> Result<()> {
     });
 
     let dns_task = if cli.dns_enabled() {
-        let dns_listen: SocketAddr = cli
-            .dns_listen
-            .parse()
-            .with_context(|| format!("invalid --dns-listen `{}`", cli.dns_listen))?;
+        let dns_listen = cli.dns_listen.clone();
         let dns_cfg = DnsConfig {
             stale_good: cli.stale_good,
             min_protocol_version: cli.min_protocol_version,
             min_user_agent: cli.min_user_agent.clone(),
             ..DnsConfig::new(
                 network_id,
-                dns_listen,
+                dns_listen.clone(),
                 cli.dns_zone.clone().expect("dns_enabled implies dns_zone"),
                 cli.dns_nameserver.clone().expect("dns_enabled implies dns_nameserver"),
             )

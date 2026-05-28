@@ -39,7 +39,10 @@ pub(crate) fn collect_disk(db_path: &Path) -> Value {
     let db_size_bytes = std::fs::metadata(db_path).map(|m| m.len()).unwrap_or(0);
     let disks = Disks::new_with_refreshed_list();
     let canonical = std::fs::canonicalize(db_path).unwrap_or_else(|err| {
-        debug!("web: collect_disk: canonicalize({}) failed: {err}; falling back to raw path", db_path.display());
+        debug!(
+            "web: collect_disk: canonicalize({}) failed: {err}; falling back to raw path",
+            db_path.display()
+        );
         db_path.to_path_buf()
     });
     let best = disks
