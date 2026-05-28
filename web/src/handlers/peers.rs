@@ -120,7 +120,7 @@ pub(crate) async fn submit(
     if let Some(expected) = state.config.api_key.as_deref() {
         let presented = headers.get(&X_API_KEY).and_then(|v| v.to_str().ok());
         if presented != Some(expected) {
-            state.obs.metrics.record_rejected();
+            state.obs.metrics.record_post_rejected_auth();
             return (StatusCode::UNAUTHORIZED, "missing or invalid api key").into_response();
         }
     }
@@ -128,19 +128,19 @@ pub(crate) async fn submit(
     if !state.config.allowed_origins.is_empty() {
         let origin = headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok()).unwrap_or("");
         if !state.config.allowed_origins.iter().any(|o| o == origin) {
-            state.obs.metrics.record_rejected();
+            state.obs.metrics.record_post_rejected_cors();
             return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
         }
     }
 
     let client = client_ip(&headers, remote);
     if !state.limiter.check(client) {
-        state.obs.metrics.record_rejected();
+        state.obs.metrics.record_post_rejected_ratelimit();
         return (StatusCode::TOO_MANY_REQUESTS, "rate limited").into_response();
     }
 
     let Ok(addr) = SocketAddr::from_str(body.trim()) else {
-        state.obs.metrics.record_rejected();
+        state.obs.metrics.record_post_rejected_format();
         return (StatusCode::BAD_REQUEST, "invalid ip:port").into_response();
     };
 
@@ -149,7 +149,7 @@ pub(crate) async fn submit(
         port: addr.port(),
     };
     if !is_acceptable_address(&net, state.config.network_default_port, state.config.strict_port) {
-        state.obs.metrics.record_rejected();
+        state.obs.metrics.record_post_rejected_unroutable();
         return (
             StatusCode::BAD_REQUEST,
             "address is not publicly routable or uses a disallowed port",
@@ -166,7 +166,7 @@ pub(crate) async fn submit(
             (StatusCode::OK, Json(PeerDto::from_record(&rec, expose))).into_response()
         }
         Err(err) => {
-            state.obs.metrics.record_rejected();
+            state.obs.metrics.record_post_rejected_probe();
             debug!("web: POST /peers probe of {addr} failed: {err}");
             (StatusCode::BAD_GATEWAY, format!("probe failed: {err}")).into_response()
         }

@@ -17,7 +17,7 @@ use simply_kaspa_dnsseeder_dns::{DnsMetrics, DnsSnapshot};
 use simply_kaspa_dnsseeder_store::PeerStore;
 use simply_kaspa_dnsseeder_web::{WebMetrics, WebSnapshot};
 
-pub(super) const METRICS_KEY: &str = "stats/snapshot_v1";
+pub(super) const METRICS_KEY: &str = "stats/snapshot";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub(super) struct MetricsSnapshot {
@@ -31,6 +31,12 @@ pub(super) struct MetricsSnapshot {
 pub(super) struct CrawlerSnap {
     pub ok: u64,
     pub failed: u64,
+    pub failed_connect: u64,
+    pub failed_handshake: u64,
+    pub failed_addresses: u64,
+    pub failed_timeout: u64,
+    pub failed_too_many_addresses: u64,
+    pub probes_skipped_backpressure: u64,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -48,6 +54,12 @@ pub(super) struct WebSnap {
     pub requests: u64,
     pub accepted: u64,
     pub rejected: u64,
+    pub post_rejected_auth: u64,
+    pub post_rejected_cors: u64,
+    pub post_rejected_ratelimit: u64,
+    pub post_rejected_format: u64,
+    pub post_rejected_unroutable: u64,
+    pub post_rejected_probe: u64,
 }
 
 impl MetricsSnapshot {
@@ -56,6 +68,12 @@ impl MetricsSnapshot {
             crawler: CrawlerSnap {
                 ok: crawler.ok,
                 failed: crawler.failed,
+                failed_connect: crawler.failed_connect,
+                failed_handshake: crawler.failed_handshake,
+                failed_addresses: crawler.failed_addresses,
+                failed_timeout: crawler.failed_timeout,
+                failed_too_many_addresses: crawler.failed_too_many_addresses,
+                probes_skipped_backpressure: crawler.probes_skipped_backpressure,
             },
             dns: DnsSnap {
                 answered: dns.answered,
@@ -69,6 +87,12 @@ impl MetricsSnapshot {
                 requests: web.requests,
                 accepted: web.accepted,
                 rejected: web.rejected,
+                post_rejected_auth: web.post_rejected_auth,
+                post_rejected_cors: web.post_rejected_cors,
+                post_rejected_ratelimit: web.post_rejected_ratelimit,
+                post_rejected_format: web.post_rejected_format,
+                post_rejected_unroutable: web.post_rejected_unroutable,
+                post_rejected_probe: web.post_rejected_probe,
             },
             persisted_at_ms: now_ms,
         }
@@ -79,6 +103,12 @@ impl MetricsSnapshot {
             ok: self.crawler.ok,
             failed: self.crawler.failed,
             in_flight: 0,
+            failed_connect: self.crawler.failed_connect,
+            failed_handshake: self.crawler.failed_handshake,
+            failed_addresses: self.crawler.failed_addresses,
+            failed_timeout: self.crawler.failed_timeout,
+            failed_too_many_addresses: self.crawler.failed_too_many_addresses,
+            probes_skipped_backpressure: self.crawler.probes_skipped_backpressure,
         });
         dns.restore(&DnsSnapshot {
             answered: self.dns.answered,
@@ -92,6 +122,12 @@ impl MetricsSnapshot {
             requests: self.web.requests,
             accepted: self.web.accepted,
             rejected: self.web.rejected,
+            post_rejected_auth: self.web.post_rejected_auth,
+            post_rejected_cors: self.web.post_rejected_cors,
+            post_rejected_ratelimit: self.web.post_rejected_ratelimit,
+            post_rejected_format: self.web.post_rejected_format,
+            post_rejected_unroutable: self.web.post_rejected_unroutable,
+            post_rejected_probe: self.web.post_rejected_probe,
         });
     }
 }

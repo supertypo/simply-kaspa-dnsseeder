@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,8 +22,21 @@ pub struct Snapshot {
     pub(crate) v6: Box<[IpAddr]>,
 }
 
+impl Snapshot {
+    #[must_use]
+    pub fn v4_len(&self) -> usize {
+        self.v4.len()
+    }
+
+    #[must_use]
+    pub fn v6_len(&self) -> usize {
+        self.v6.len()
+    }
+}
+
 pub struct ServingCache {
     inner: Mutex<Arc<Snapshot>>,
+    last_refresh_ms: AtomicI64,
 }
 
 impl ServingCache {
@@ -30,6 +44,7 @@ impl ServingCache {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(Arc::new(Snapshot::default())),
+            last_refresh_ms: AtomicI64::new(0),
         }
     }
 
@@ -39,6 +54,14 @@ impl ServingCache {
 
     pub fn store(&self, snap: Arc<Snapshot>) {
         *self.inner.lock().expect("serving cache mutex poisoned") = snap;
+        self.last_refresh_ms.store(now_ms(), Ordering::Relaxed);
+    }
+
+    /// Wall-clock timestamp (ms since epoch) of the last successful refresh,
+    /// or 0 if no refresh has completed yet.
+    #[must_use]
+    pub fn last_refresh_ms(&self) -> i64 {
+        self.last_refresh_ms.load(Ordering::Relaxed)
     }
 }
 

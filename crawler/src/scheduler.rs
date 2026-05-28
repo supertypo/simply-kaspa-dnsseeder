@@ -196,7 +196,10 @@ impl Scheduler {
             .await?;
         let scanned = candidates.len();
         let mut dispatched = 0usize;
-        for rec in candidates {
+        let mut iter = candidates.into_iter();
+        let mut skipped_backpressure: u64 = 0;
+        let mut full = false;
+        for rec in iter.by_ref() {
             if !is_acceptable_address(&rec.address, default_port, strict_port) {
                 continue;
             }
@@ -210,12 +213,19 @@ impl Scheduler {
                     dispatched += 1;
                 }
                 EnqueueOutcome::Duplicate => {}
-                EnqueueOutcome::Full => break,
+                EnqueueOutcome::Full => {
+                    full = true;
+                    break;
+                }
                 EnqueueOutcome::Closed => return Ok(()),
             }
         }
+        if full {
+            skipped_backpressure = 1 + u64::try_from(iter.count()).unwrap_or(0);
+            self.metrics.record_skipped_backpressure(skipped_backpressure);
+        }
         debug!(
-            "crawler: probe tick (index_scanned={scanned}, dispatched={dispatched}, in_flight={})",
+            "crawler: probe tick (index_scanned={scanned}, dispatched={dispatched}, skipped_backpressure={skipped_backpressure}, in_flight={})",
             pool.in_flight_len()
         );
         Ok(())

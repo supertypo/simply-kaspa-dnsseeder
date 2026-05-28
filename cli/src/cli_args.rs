@@ -61,11 +61,11 @@ pub struct CrawlerArgs {
     pub probes_per_peer: u8,
 
     /// Maximum total duration of a single probe (connect + handshake + addresses).
-    #[clap(long, default_value = "8s", value_parser = humantime::parse_duration)]
+    #[clap(long, default_value = "4s", value_parser = humantime::parse_duration)]
     pub probe_timeout: Duration,
 
     /// Interval between probe scheduling ticks.
-    #[clap(long, default_value = "10s", value_parser = humantime::parse_duration)]
+    #[clap(long, default_value = "5s", value_parser = humantime::parse_duration)]
     pub probe_tick: Duration,
 
     /// Re-probe interval for peers that have succeeded at least once.

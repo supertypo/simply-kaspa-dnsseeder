@@ -25,6 +25,8 @@ pub struct StoreSummary {
     pub stale: u64,
     /// Peers that have never succeeded (`last_success_ms <= 0`).
     pub failed: u64,
+    /// Subset of `failed` that have also never been attempted (`last_attempt_ms <= 0`).
+    pub stub: u64,
     /// Count of good IPv4 peers (subset of `good`).
     pub v4: u64,
     /// Count of good IPv6 peers (subset of `good`).
@@ -390,6 +392,9 @@ impl PeerStore {
             s.total += 1;
             if rec.last_success_ms <= 0 {
                 s.failed += 1;
+                if rec.last_attempt_ms <= 0 {
+                    s.stub += 1;
+                }
                 continue;
             }
             let age = now_ms.saturating_sub(rec.last_success_ms);

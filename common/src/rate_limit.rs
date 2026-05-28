@@ -71,7 +71,14 @@ impl RateLimiter {
         self.buckets.retain(|_, b| now < b.refill_at);
     }
 
-    #[doc(hidden)]
+    /// Total times `check` has been invoked since process start.
+    #[must_use]
+    pub fn ops(&self) -> u64 {
+        self.ops.load(Ordering::Relaxed)
+    }
+
+    /// Number of per-IP buckets currently tracked.
+    #[must_use]
     pub fn tracked_ips(&self) -> usize {
         self.buckets.len()
     }

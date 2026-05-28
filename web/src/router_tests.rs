@@ -61,6 +61,8 @@ fn make_state(prober: Arc<dyn Prober>, store: PeerStore, api_key: Option<String>
         min_user_agent: None,
         service_name: "test",
         service_version: "0.0.0",
+        service_commit: "test",
+        service_network: String::from("kaspa-mainnet"),
     };
     AppState::builder(store, prober, cfg).build()
 }
@@ -268,6 +270,8 @@ async fn rate_limit_blocks_repeated_posts() {
         min_user_agent: None,
         service_name: "test",
         service_version: "0.0.0",
+        service_commit: "test",
+        service_network: String::from("kaspa-mainnet"),
     };
     let state = AppState::builder(store, Arc::new(MockProber::default()), cfg).build();
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
@@ -378,6 +382,8 @@ async fn list_peers_applies_protocol_version_filter_unless_all() {
         min_user_agent: None,
         service_name: "test",
         service_version: "0.0.0",
+        service_commit: "test",
+        service_network: String::from("kaspa-mainnet"),
     };
     let state = AppState::builder(store, Arc::new(MockProber::default()), cfg).build();
     let app = build_router(state);

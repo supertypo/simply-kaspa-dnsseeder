@@ -40,4 +40,8 @@ pub struct WebConfig {
     pub service_name: &'static str,
     /// Service version reported by `/metrics` and `/health`.
     pub service_version: &'static str,
+    /// Git short SHA reported by `/metrics` (`build_info`).
+    pub service_commit: &'static str,
+    /// Network id label reported by `/metrics` (`service.network`).
+    pub service_network: String,
 }

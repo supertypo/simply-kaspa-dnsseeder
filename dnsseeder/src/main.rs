@@ -77,6 +77,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         }
     });
 
+    let mut serving_cache_handle: Option<Arc<simply_kaspa_dnsseeder_dns::ServingCache>> = None;
     let dns_task = if cli.dns_enabled() {
         let dns_listen = cli.dns.dns_listen.clone();
         let dns_cfg = DnsConfig {
@@ -93,6 +94,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         let tcp_idle = dns_cfg.tcp_idle_timeout;
         let dns_shutdown = shutdown_tx.subscribe();
         let (serving_cache, _refresher) = build_serving_cache(&dns_cfg, store.clone(), shutdown_tx.subscribe());
+        serving_cache_handle = Some(serving_cache.clone());
         let handler = SeederHandler::with_metrics(dns_cfg, serving_cache, metrics.dns.clone()).context("building dns handler")?;
         Some(tokio::spawn(async move {
             match simply_kaspa_dnsseeder_dns::run_dns_server_with_handler(handler, dns_listen, tcp_idle, dns_shutdown).await {
@@ -125,11 +127,14 @@ async fn run(cli: CliArgs) -> Result<()> {
         min_user_agent: cli.dns.min_user_agent.clone(),
         service_name: "simply-kaspa-dnsseeder",
         service_version: CliArgs::version(),
+        service_commit: CliArgs::commit_id(),
+        service_network: network_id.to_string(),
     };
     let prober = Arc::new(SchedulerProber::new(probe.clone(), store.clone()));
     let metrics_source: Arc<dyn MetricsSource> = Arc::new(SubsystemMetrics {
         crawler: metrics.crawler.clone(),
         dns: metrics.dns.clone(),
+        serving_cache: serving_cache_handle.clone(),
     });
     let state = AppState::builder(store.clone(), prober, web_cfg)
         .metrics(metrics.web.clone())

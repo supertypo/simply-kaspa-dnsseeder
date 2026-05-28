@@ -19,8 +19,8 @@ fn defaults_match_spec() {
     let cli = parse(&["--network-id", "kaspa-mainnet"]);
     assert_eq!(cli.crawler.threads, 8);
     assert_eq!(cli.crawler.probes_per_peer, 3);
-    assert_eq!(cli.crawler.probe_timeout, Duration::from_secs(8));
-    assert_eq!(cli.crawler.probe_tick, Duration::from_secs(10));
+    assert_eq!(cli.crawler.probe_timeout, Duration::from_secs(4));
+    assert_eq!(cli.crawler.probe_tick, Duration::from_secs(5));
     assert_eq!(cli.crawler.stale_good, Duration::from_secs(30 * 60));
     assert_eq!(cli.crawler.stale_bad, Duration::from_secs(2 * 60 * 60));
     assert_eq!(cli.crawler.dead_after, Duration::from_secs(7 * 24 * 60 * 60));

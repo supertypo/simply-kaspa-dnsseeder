@@ -47,6 +47,7 @@ pub(crate) async fn probe_one(
         Err(err) => {
             if let Some(m) = metrics {
                 m.record_failed();
+                m.record_failed_kind(&err);
             }
             debug!("crawler: probe {addr} failed: {err}");
             // `last_attempt` was already bumped by the scheduler before dispatch.
