@@ -77,6 +77,10 @@ Every log line starts with the *owning* subsystem (`crawler:`, `dns:`, `web:`, `
 
 This file is the agent onboarding cheat sheet. When you change something that contradicts it — new endpoint, renamed module, changed default, new invariant, removed knob — update the relevant section in the same change. Keep it short and to the point: facts and invariants only, no historical narrative, no exhaustive API lists (the README owns those). If a section gets longer than ~5 lines, that's a hint to either tighten it or split the concept out of the codebase.
 
+## Keeping the Dockerfile in sync
+
+`docker/Dockerfile` has a dependency-prefetch stub block that lists every workspace member's `Cargo.toml` and creates a placeholder `lib.rs` / `main.rs` / `build.rs` for each. When you add, remove, or rename a workspace member (or its crate root layout changes), update both the `COPY ... Cargo.toml` lines and the `RUN mkdir ... && echo ...` block to match. Forgetting this silently skips the dep cache or breaks the image build. The Rust base image version is read from `Cargo.toml`'s `rust-version` by `docker/build.sh` and passed in as `--build-arg RUST_VERSION=...`, so bumping the toolchain only requires editing `Cargo.toml` + `rust-toolchain.toml`.
+
 ## Quick-start commands
 
 ```bash
