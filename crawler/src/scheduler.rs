@@ -31,6 +31,12 @@ use crate::seeders::{Resolver, dns_seed_many};
 
 /// Maximum probes dispatched per `probe_tick` per configured thread.
 pub(crate) const BATCH_PER_THREAD: usize = 10;
+/// Upper bound on outstanding probe tasks (waiting + running), expressed as a
+/// multiple of `threads`. When the in-flight set is at or above
+/// `threads * MAX_IN_FLIGHT_PER_THREAD`, ticks dispatch nothing new so the
+/// backlog can drain instead of growing unboundedly when probes take longer
+/// than `probe_tick`.
+pub(crate) const MAX_IN_FLIGHT_PER_THREAD: usize = 10;
 /// Pruning runs on this fixed cadence (matches Go dnsseeder).
 const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 
@@ -184,7 +190,19 @@ impl Scheduler {
 
     /// Scan the store for eligible peers, randomly select up to
     /// `threads * BATCH_PER_THREAD`, and dispatch probes through the semaphore.
+    /// Skips dispatch entirely when the in-flight backlog has reached
+    /// `threads * MAX_IN_FLIGHT_PER_THREAD` so slow probes can drain.
     fn enqueue_probes(&self) -> Result<(), Error> {
+        let threads = self.config.threads.max(1);
+        let in_flight_cap = threads.saturating_mul(MAX_IN_FLIGHT_PER_THREAD);
+        let current_in_flight = self.in_flight.len();
+        if current_in_flight >= in_flight_cap {
+            debug!(
+                "crawler: probe tick skipped (in_flight={current_in_flight} >= cap={in_flight_cap})"
+            );
+            return Ok(());
+        }
+
         let now = now_ms();
         let dead_cutoff = now.saturating_sub(self.config.dead_after_ms());
         let stale_good_ms = self.config.stale_good_ms();
@@ -210,7 +228,8 @@ impl Scheduler {
             return Ok(());
         }
 
-        let batch_max = self.config.threads.max(1).saturating_mul(BATCH_PER_THREAD);
+        let headroom = in_flight_cap.saturating_sub(current_in_flight);
+        let batch_max = threads.saturating_mul(BATCH_PER_THREAD).min(headroom);
         {
             let mut rng = rand::thread_rng();
             eligible.shuffle(&mut rng);

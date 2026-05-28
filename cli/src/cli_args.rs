@@ -19,11 +19,12 @@ pub struct CliArgs {
     pub threads: usize,
 
     /// Maximum total duration of a single probe (connect + handshake + addresses).
-    #[clap(long, default_value = "10s", value_parser = humantime::parse_duration)]
+    #[clap(long, default_value = "8s", value_parser = humantime::parse_duration)]
     pub probe_timeout: Duration,
 
     /// Interval between probe scheduling ticks. Each tick selects a random
-    /// batch of up to `threads * 10` eligible peers and dispatches probes.
+    /// batch of up to `threads * 10` eligible peers and dispatches probes,
+    /// capped so the total in-flight backlog never exceeds `threads * 10`.
     #[clap(long, default_value = "10s", value_parser = humantime::parse_duration)]
     pub probe_tick: Duration,
 
