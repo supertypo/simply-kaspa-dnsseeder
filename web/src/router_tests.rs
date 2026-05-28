@@ -57,6 +57,8 @@ fn make_state(prober: Arc<dyn Prober>, store: PeerStore, api_key: Option<String>
         api_prefix: String::new(),
         db_path: std::path::PathBuf::from("_test_unused.redb"),
         stale_good: Duration::from_secs(900),
+        min_protocol_version: None,
+        min_user_agent: None,
         service_name: "test",
         service_version: "0.0.0",
     };
@@ -68,6 +70,14 @@ fn seeded_store() -> (TempDir, PeerStore) {
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let mut id = [0u8; 16];
     id[0] = 0x11;
+    // Use a recent timestamp so the peer falls within the test stale_good window (900s).
+    let now = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0),
+    )
+    .unwrap_or(0);
     store
         .upsert(&PeerRecord {
             id,
@@ -79,10 +89,10 @@ fn seeded_store() -> (TempDir, PeerStore) {
             },
             user_agent: "/kaspad:1.0.0/".to_string(),
             subnetwork_id: None,
-            first_seen_ms: 100,
-            last_attempt_ms: 100,
-            last_success_ms: 100,
-            last_seen_ms: 100,
+            first_seen_ms: now,
+            last_attempt_ms: now,
+            last_success_ms: now,
+            last_seen_ms: now,
         })
         .unwrap();
     (temp, store)
@@ -254,6 +264,8 @@ async fn rate_limit_blocks_repeated_posts() {
         api_prefix: String::new(),
         db_path: std::path::PathBuf::from("_test_unused.redb"),
         stale_good: Duration::from_secs(900),
+        min_protocol_version: None,
+        min_user_agent: None,
         service_name: "test",
         service_version: "0.0.0",
     };
@@ -353,4 +365,69 @@ async fn post_peers_rejects_ephemeral_port() {
         .unwrap();
     let res = conn.call(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn list_peers_applies_protocol_version_filter_unless_all() {
+    let (_temp, store) = seeded_store();
+    // Seed peer protocol_version = 7; require >= 10 → default list should be empty,
+    // ?all=true should still include it (freshness only).
+    let cfg = WebConfig {
+        listen: "127.0.0.1:0".parse().unwrap(),
+        api_key: None,
+        allowed_origins: Vec::new(),
+        post_rate_limit: 5,
+        rate_limit_window: Duration::from_secs(60),
+        network_default_port: 16111,
+        strict_port: false,
+        api_prefix: String::new(),
+        db_path: std::path::PathBuf::from("_test_unused.redb"),
+        stale_good: Duration::from_secs(900),
+        min_protocol_version: Some(10),
+        min_user_agent: None,
+        service_name: "test",
+        service_version: "0.0.0",
+    };
+    let state = AppState::new(store, Arc::new(MockProber::default()), cfg);
+    let app = build_router(state);
+
+    let res = app
+        .clone()
+        .oneshot(Request::get("/peers").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 0, "default list filters out protocol_version < 10");
+
+    let res = app
+        .oneshot(Request::get("/peers?all=true").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 1, "?all=true returns the peer regardless of protocol_version");
+}
+
+#[tokio::test]
+async fn list_peers_hides_stubs_in_both_modes() {
+    let temp = TempDir::new().unwrap();
+    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
+    // A stub: last_success_ms = 0 → fails the freshness gate.
+    let net = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), port: 16111 };
+    store.insert_stub_if_missing(&net, 0).unwrap();
+
+    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let app = build_router(state);
+
+    for url in ["/peers", "/peers?all=true"] {
+        let res = app
+            .clone()
+            .oneshot(Request::get(url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json.as_array().unwrap().len(), 0, "stubs must never appear (url={url})");
+    }
 }

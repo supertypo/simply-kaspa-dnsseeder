@@ -3228,6 +3228,7 @@ dependencies = [
  "hex",
  "humantime",
  "log",
+ "semver",
  "serde",
  "serde_json",
  "simply-kaspa-dnsseeder-crawler",

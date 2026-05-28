@@ -4,13 +4,15 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use axum::Json;
-use axum::extract::{ConnectInfo, Path, State};
+use axum::extract::{ConnectInfo, Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use log::{debug, warn};
+use serde::Deserialize;
 use simply_kaspa_dnsseeder_crawler::is_acceptable_address;
 use simply_kaspa_dnsseeder_store::{Filter, NetAddress};
 
+use crate::config::WebConfig;
 use crate::dto::PeerDto;
 use crate::state::AppState;
 use crate::util::{X_API_KEY, canonicalize_ip, client_ip, expose_ip, now_ms};
@@ -20,22 +22,43 @@ use crate::util::{X_API_KEY, canonicalize_ip, client_ip, expose_ip, now_ms};
 /// UI use; clients that need more should use the DNS interface.
 const MAX_LIST_RESPONSE: usize = 1000;
 
+#[derive(Debug, Deserialize, Default)]
+pub(crate) struct ListQuery {
+    /// When true, the protocol-version and user-agent filters are skipped but
+    /// freshness (stale-good window) and stub exclusion still apply.
+    #[serde(default)]
+    all: bool,
+}
+
+/// Build the filter used by `GET /peers` and `GET /peers/{addr}`. Always
+/// enforces the stale-good window (which also implicitly hides stubs, since
+/// stubs have `last_success_ms = 0`). When `all` is false, also enforces the
+/// configured protocol-version and user-agent floors, matching the DNS path.
+fn list_filter(cfg: &WebConfig, all: bool) -> Filter {
+    let stale_good_ms = i64::try_from(cfg.stale_good.as_millis()).unwrap_or(i64::MAX);
+    Filter {
+        now_ms: now_ms(),
+        dead_after_ms: i64::MAX,
+        stale_good_ms: Some(stale_good_ms),
+        family: None,
+        min_protocol_version: if all { None } else { cfg.min_protocol_version },
+        min_user_agent: if all { None } else { cfg.min_user_agent.clone() },
+        default_port: None,
+    }
+}
+
 pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {
     state.metrics.record_request();
     "pong"
 }
 
-pub(crate) async fn list(State(state): State<AppState>, headers: HeaderMap) -> Response {
+pub(crate) async fn list(
+    State(state): State<AppState>,
+    Query(q): Query<ListQuery>,
+    headers: HeaderMap,
+) -> Response {
     state.metrics.record_request();
-    let filter = Filter {
-        now_ms: now_ms(),
-        dead_after_ms: i64::MAX,
-        stale_good_ms: None,
-        family: None,
-        min_protocol_version: None,
-        min_user_agent: None,
-        default_port: None,
-    };
+    let filter = list_filter(&state.config, q.all);
     let mut records = match state.store.collect_matching(&filter) {
         Ok(v) => v,
         Err(err) => {
@@ -53,7 +76,12 @@ pub(crate) async fn list(State(state): State<AppState>, headers: HeaderMap) -> R
     Json(dtos).into_response()
 }
 
-pub(crate) async fn get(State(state): State<AppState>, Path(addr_str): Path<String>, headers: HeaderMap) -> Response {
+pub(crate) async fn get(
+    State(state): State<AppState>,
+    Path(addr_str): Path<String>,
+    Query(q): Query<ListQuery>,
+    headers: HeaderMap,
+) -> Response {
     state.metrics.record_request();
     let Ok(addr) = SocketAddr::from_str(&addr_str) else {
         return (StatusCode::BAD_REQUEST, "addr must be ip:port").into_response();
@@ -62,12 +90,13 @@ pub(crate) async fn get(State(state): State<AppState>, Path(addr_str): Path<Stri
         ip: canonicalize_ip(addr.ip()),
         port: addr.port(),
     };
+    let filter = list_filter(&state.config, q.all);
     match state.store.get(&net) {
-        Ok(Some(rec)) => {
+        Ok(Some(rec)) if filter.matches(&rec) => {
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
             Json(PeerDto::from_record(&rec, expose, state.config.network_default_port)).into_response()
         }
-        Ok(None) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
+        Ok(_) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
         Err(err) => {
             warn!("web: GET /peers/<addr> store error: {err}");
             (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response()

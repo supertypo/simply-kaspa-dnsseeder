@@ -122,6 +122,8 @@ async fn run(cli: CliArgs) -> Result<()> {
         api_prefix: cli.api_prefix.clone(),
         db_path: store_path.clone(),
         stale_good: cli.stale_good,
+        min_protocol_version: cli.min_protocol_version,
+        min_user_agent: cli.min_user_agent.clone(),
         service_name: "simply-kaspa-dnsseeder",
         service_version: CliArgs::version(),
     };

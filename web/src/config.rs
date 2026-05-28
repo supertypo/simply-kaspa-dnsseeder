@@ -2,6 +2,8 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use semver::Version;
+
 /// Configuration for the HTTP server. None of these values are mutable at
 /// runtime: a fresh config means a fresh [`crate::AppState`].
 #[derive(Debug, Clone)]
@@ -28,6 +30,12 @@ pub struct WebConfig {
     pub db_path: PathBuf,
     /// Stale-good window used by `/health` and `/metrics` to count "good" peers.
     pub stale_good: Duration,
+    /// Minimum kaspad protocol version peers must advertise to appear in
+    /// `GET /peers` (mirrors the DNS filter). `?all=true` bypasses this.
+    pub min_protocol_version: Option<u32>,
+    /// Minimum kaspad semver peers must advertise to appear in `GET /peers`
+    /// (mirrors the DNS filter). `?all=true` bypasses this.
+    pub min_user_agent: Option<Version>,
     /// Process name reported by `/metrics`.
     pub service_name: &'static str,
     /// Service version reported by `/metrics` and `/health`.
