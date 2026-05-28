@@ -35,6 +35,9 @@ const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 /// Per-host timeout for `--seeder` lookups. Mirrors the built-in DNS-seeder
 /// timeout so a single dead host can't stall bootstrap indefinitely.
 const SEEDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Cap on the bulk peer-close at shutdown so hung remotes can't keep the
+/// process alive past Docker's SIGTERM grace.
+const PROBE_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
 pub struct SchedulerConfig {
@@ -126,7 +129,9 @@ impl Scheduler {
                 _ = shutdown.recv() => {
                     info!("crawler: shutdown signal received");
                     self.cancel.cancel();
-                    self.probe.close().await;
+                    if tokio::time::timeout(PROBE_CLOSE_TIMEOUT, self.probe.close()).await.is_err() {
+                        warn!("crawler: probe close exceeded {PROBE_CLOSE_TIMEOUT:?}, continuing shutdown");
+                    }
                     break;
                 }
                 _ = probe_ticker.tick() => {
