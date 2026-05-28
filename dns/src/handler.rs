@@ -40,17 +40,22 @@ impl SeederHandler {
         Self::with_metrics(config, store, Arc::new(DnsMetrics::new()))
     }
 
-    pub fn with_metrics(
-        config: DnsConfig,
-        store: PeerStore,
-        metrics: Arc<DnsMetrics>,
-    ) -> Result<Self, hickory_proto::ProtoError> {
+    pub fn with_metrics(config: DnsConfig, store: PeerStore, metrics: Arc<DnsMetrics>) -> Result<Self, hickory_proto::ProtoError> {
         let apex = fqdn(&config.dns_zone)?;
         let nameserver = fqdn(&config.nameserver)?;
         let hostmaster = Name::from_str("hostmaster.")?.append_domain(&apex)?;
         let p2p_port = config.network_id.default_p2p_port();
         let rate_limit = Arc::new(RateLimiter::new(config.queries_per_ip_per_second, config.rate_limit_window));
-        Ok(Self { config: Arc::new(config), store, apex, nameserver, hostmaster, p2p_port, rate_limit, metrics })
+        Ok(Self {
+            config: Arc::new(config),
+            store,
+            apex,
+            nameserver,
+            hostmaster,
+            p2p_port,
+            rate_limit,
+            metrics,
+        })
     }
 
     #[must_use]
@@ -115,8 +120,7 @@ impl SeederHandler {
     fn soa_record(&self) -> Record {
         // RFC 1982 serial-number arithmetic: truncation to u32 is the expected wrap.
         #[allow(clippy::cast_possible_truncation)]
-        let serial = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs()
-            & u64::from(u32::MAX)) as u32;
+        let serial = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or(Duration::ZERO).as_secs() & u64::from(u32::MAX)) as u32;
         let rdata = SOA::new(
             self.nameserver.clone(),
             self.hostmaster.clone(),
@@ -136,7 +140,11 @@ impl RequestHandler for SeederHandler {
         let src = request.src();
 
         if request.message_type() != MessageType::Query || request.op_code() != OpCode::Query {
-            trace!("dns: rejecting non-query from {src}: type={:?} op={:?}", request.message_type(), request.op_code());
+            trace!(
+                "dns: rejecting non-query from {src}: type={:?} op={:?}",
+                request.message_type(),
+                request.op_code()
+            );
             self.metrics.record_refused();
             return refuse(request, response_handle).await;
         }
@@ -174,14 +182,23 @@ impl RequestHandler for SeederHandler {
         }
 
         let answers = self.build_answers(qtype);
-        self.metrics.record_answered(qtype == RecordType::A, qtype == RecordType::AAAA, answers.len());
+        self.metrics
+            .record_answered(qtype == RecordType::A, qtype == RecordType::AAAA, answers.len());
         debug!("dns: answered {qtype:?} for {qname} from {src} with {} record(s)", answers.len());
         let mut header = Header::response_from_request(request.header());
         header.set_authoritative(true);
         header.set_response_code(ResponseCode::NoError);
 
-        let soa = if answers.is_empty() && qtype != RecordType::SOA { vec![self.soa_record()] } else { Vec::new() };
-        let ns = if matches!(qtype, RecordType::A | RecordType::AAAA) { vec![self.ns_record()] } else { Vec::new() };
+        let soa = if answers.is_empty() && qtype != RecordType::SOA {
+            vec![self.soa_record()]
+        } else {
+            Vec::new()
+        };
+        let ns = if matches!(qtype, RecordType::A | RecordType::AAAA) {
+            vec![self.ns_record()]
+        } else {
+            Vec::new()
+        };
 
         send(request, response_handle, header, &answers, &ns, &soa).await
     }
@@ -212,7 +229,10 @@ async fn send<R: ResponseHandler>(
 
 async fn refuse<R: ResponseHandler>(request: &Request, mut response_handle: R) -> ResponseInfo {
     let builder = MessageResponseBuilder::from_message_request(request);
-    match response_handle.send_response(builder.error_msg(request.header(), ResponseCode::Refused)).await {
+    match response_handle
+        .send_response(builder.error_msg(request.header(), ResponseCode::Refused))
+        .await
+    {
         Ok(info) => info,
         Err(_) => error_info(ResponseCode::ServFail),
     }

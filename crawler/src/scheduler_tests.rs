@@ -25,8 +25,16 @@ mod is_acceptable_address {
 
     #[test]
     fn accepts_public_v6() {
-        assert!(is_acceptable_address(&net(v6("2001:4860:4860::8888"), DEFAULT_PORT), DEFAULT_PORT, false));
-        assert!(is_acceptable_address(&net(v6("2606:4700:4700::1111"), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(is_acceptable_address(
+            &net(v6("2001:4860:4860::8888"), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
+        assert!(is_acceptable_address(
+            &net(v6("2606:4700:4700::1111"), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
     }
 
     #[test]
@@ -71,7 +79,11 @@ mod is_acceptable_address {
         assert!(!is_acceptable_address(&net(v4(10, 0, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
         assert!(!is_acceptable_address(&net(v4(192, 168, 1, 1), DEFAULT_PORT), DEFAULT_PORT, false));
         assert!(!is_acceptable_address(&net(v4(172, 16, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
-        assert!(!is_acceptable_address(&net(v4(172, 31, 255, 254), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(
+            &net(v4(172, 31, 255, 254), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
     }
 
     #[test]
@@ -82,7 +94,11 @@ mod is_acceptable_address {
     #[test]
     fn rejects_v4_link_local_and_broadcast() {
         assert!(!is_acceptable_address(&net(v4(169, 254, 1, 1), DEFAULT_PORT), DEFAULT_PORT, false));
-        assert!(!is_acceptable_address(&net(v4(255, 255, 255, 255), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(
+            &net(v4(255, 255, 255, 255), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
     }
 
     #[test]
@@ -95,7 +111,11 @@ mod is_acceptable_address {
     #[test]
     fn rejects_v6_unique_local_and_link_local() {
         assert!(!is_acceptable_address(&net(v6("fc00::1"), DEFAULT_PORT), DEFAULT_PORT, false));
-        assert!(!is_acceptable_address(&net(v6("fd12:3456:789a::1"), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(
+            &net(v6("fd12:3456:789a::1"), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
         assert!(!is_acceptable_address(&net(v6("fe80::1"), DEFAULT_PORT), DEFAULT_PORT, false));
     }
 
@@ -130,7 +150,10 @@ mod probe_one_fanout {
     #[async_trait]
     impl Probe for FanoutProbe {
         async fn probe(&self, _addr: SocketAddr) -> Result<ProbeResult, ProbeError> {
-            Ok(ProbeResult { version: version_msg(), addresses: self.addresses.clone() })
+            Ok(ProbeResult {
+                version: version_msg(),
+                addresses: self.addresses.clone(),
+            })
         }
     }
 
@@ -169,10 +192,7 @@ mod probe_one_fanout {
     #[tokio::test]
     async fn inserts_stubs_for_routable_advertised_addresses() {
         let probe = FanoutProbe {
-            addresses: vec![
-                (ip4(8, 8, 8, 8), 16111),
-                (ip4(1, 1, 1, 1), 16222),
-            ],
+            addresses: vec![(ip4(8, 8, 8, 8), 16111), (ip4(1, 1, 1, 1), 16222)],
         };
         let (_d, store) = open_store();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
@@ -186,25 +206,32 @@ mod probe_one_fanout {
 
     #[tokio::test]
     async fn falls_back_to_default_port_when_zero() {
-        let probe = FanoutProbe { addresses: vec![(ip4(8, 8, 4, 4), 0)] };
+        let probe = FanoutProbe {
+            addresses: vec![(ip4(8, 8, 4, 4), 0)],
+        };
         let (_d, store) = open_store();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
 
         Scheduler::probe_one(&probe, &store, source, DEFAULT_PORT, false, None).await;
 
-        assert!(store.get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4)), DEFAULT_PORT)).unwrap().is_some());
+        assert!(
+            store
+                .get(&net(IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4)), DEFAULT_PORT))
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
     async fn skips_non_routable_addresses() {
         let probe = FanoutProbe {
             addresses: vec![
-                (ip4(10, 0, 0, 1), 16111),       // private
-                (ip4(127, 0, 0, 1), 16111),      // loopback
-                (ip4(169, 254, 1, 1), 16111),    // link-local
-                (ip4(224, 0, 0, 1), 16111),      // multicast
-                (ip6("fc00::1"), 16111),         // v6 ULA
-                (ip4(8, 8, 8, 8), 16111),        // ← only this should pass
+                (ip4(10, 0, 0, 1), 16111),    // private
+                (ip4(127, 0, 0, 1), 16111),   // loopback
+                (ip4(169, 254, 1, 1), 16111), // link-local
+                (ip4(224, 0, 0, 1), 16111),   // multicast
+                (ip6("fc00::1"), 16111),      // v6 ULA
+                (ip4(8, 8, 8, 8), 16111),     // ← only this should pass
             ],
         };
         let (_d, store) = open_store();
@@ -222,11 +249,7 @@ mod probe_one_fanout {
     #[tokio::test]
     async fn duplicates_within_one_result_only_insert_once() {
         let probe = FanoutProbe {
-            addresses: vec![
-                (ip4(8, 8, 8, 8), 16111),
-                (ip4(8, 8, 8, 8), 16111),
-                (ip4(8, 8, 8, 8), 16111),
-            ],
+            addresses: vec![(ip4(8, 8, 8, 8), 16111), (ip4(8, 8, 8, 8), 16111), (ip4(8, 8, 8, 8), 16111)],
         };
         let (_d, store) = open_store();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
@@ -241,7 +264,9 @@ mod probe_one_fanout {
 
     #[tokio::test]
     async fn discovery_does_not_overwrite_existing_record() {
-        let probe = FanoutProbe { addresses: vec![(ip4(8, 8, 8, 8), 16111)] };
+        let probe = FanoutProbe {
+            addresses: vec![(ip4(8, 8, 8, 8), 16111)],
+        };
         let (_d, store) = open_store();
         // Pre-existing record with a recent attempt+success — discovery must not touch it.
         let addr = net(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 16111);
@@ -257,7 +282,9 @@ mod probe_one_fanout {
 
     #[tokio::test]
     async fn canonicalizes_ipv4_mapped_ipv6() {
-        let probe = FanoutProbe { addresses: vec![(ip6("::ffff:8.8.8.8"), 16111)] };
+        let probe = FanoutProbe {
+            addresses: vec![(ip6("::ffff:8.8.8.8"), 16111)],
+        };
         let (_d, store) = open_store();
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
 
@@ -278,7 +305,10 @@ mod is_eligible {
             id: [0u8; 16],
             protocol_version: 0,
             timestamp_ms: 0,
-            address: NetAddress { ip: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), port: 16111 },
+            address: NetAddress {
+                ip: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+                port: 16111,
+            },
             user_agent: String::new(),
             subnetwork_id: None,
             first_seen_ms: first_seen,

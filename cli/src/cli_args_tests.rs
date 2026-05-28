@@ -85,7 +85,16 @@ fn min_user_agent_parses_semver() {
 
 #[test]
 fn min_user_agent_rejects_garbage() {
-    assert!(CliArgs::try_parse_from(["simply-kaspa-dnsseeder", "--network-id", "kaspa-mainnet", "--min-user-agent", "not-a-version"]).is_err());
+    assert!(
+        CliArgs::try_parse_from([
+            "simply-kaspa-dnsseeder",
+            "--network-id",
+            "kaspa-mainnet",
+            "--min-user-agent",
+            "not-a-version"
+        ])
+        .is_err()
+    );
 }
 
 #[test]

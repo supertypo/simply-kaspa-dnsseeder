@@ -32,12 +32,7 @@ impl AppState {
     }
 
     #[must_use]
-    pub fn with_metrics(
-        store: PeerStore,
-        prober: Arc<dyn Prober>,
-        config: WebConfig,
-        metrics: Arc<WebMetrics>,
-    ) -> Self {
+    pub fn with_metrics(store: PeerStore, prober: Arc<dyn Prober>, config: WebConfig, metrics: Arc<WebMetrics>) -> Self {
         Self::full(store, prober, config, metrics, Arc::new(NullMetricsSource))
     }
 

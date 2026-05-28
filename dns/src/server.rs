@@ -7,11 +7,7 @@ use crate::config::DnsConfig;
 use crate::error::Error;
 use crate::handler::SeederHandler;
 
-pub async fn run_dns_server(
-    config: DnsConfig,
-    store: PeerStore,
-    shutdown: tokio::sync::broadcast::Receiver<()>,
-) -> Result<(), Error> {
+pub async fn run_dns_server(config: DnsConfig, store: PeerStore, shutdown: tokio::sync::broadcast::Receiver<()>) -> Result<(), Error> {
     let listen = config.dns_listen;
     let tcp_idle = config.tcp_idle_timeout;
     let handler = SeederHandler::new(config, store)?;

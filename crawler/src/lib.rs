@@ -8,10 +8,10 @@
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 pub mod error;
+pub mod metrics;
 pub mod model;
 pub mod probe;
 pub mod probe_initializer;
-pub mod metrics;
 pub mod scheduler;
 pub mod seeders;
 

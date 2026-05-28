@@ -22,8 +22,14 @@ pub struct ProbeResult {
 pub fn peer_record_from_version(addr: SocketAddr, version: &VersionMessage, now_ms: i64, existing: Option<&PeerRecord>) -> PeerRecord {
     let id = peer_id_from_bytes(&version.id);
     let canonical_ip = canonicalize_ip(addr.ip());
-    let address = NetAddress { ip: canonical_ip, port: addr.port() };
-    let subnetwork_id: Option<[u8; 20]> = version.subnetwork_id.as_ref().and_then(|s| <[u8; 20]>::try_from(s.bytes.as_slice()).ok());
+    let address = NetAddress {
+        ip: canonical_ip,
+        port: addr.port(),
+    };
+    let subnetwork_id: Option<[u8; 20]> = version
+        .subnetwork_id
+        .as_ref()
+        .and_then(|s| <[u8; 20]>::try_from(s.bytes.as_slice()).ok());
 
     let first_seen_ms = existing.map_or(now_ms, |r| r.first_seen_ms);
 

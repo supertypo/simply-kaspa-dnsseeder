@@ -34,7 +34,11 @@ impl KaspadProbe {
         let pending: PendingMap = Arc::new(DashMap::new());
         let initializer = Arc::new(ProbeInitializer::new(config, pending.clone()));
         let adaptor = Adaptor::client_only(Hub::new(), initializer, Arc::new(TowerConnectionCounters::default()));
-        Self { adaptor, pending, probe_timeout }
+        Self {
+            adaptor,
+            pending,
+            probe_timeout,
+        }
     }
 
     #[cfg(test)]

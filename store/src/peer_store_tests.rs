@@ -88,7 +88,10 @@ fn prune_dead_removes_old_seen() {
 #[test]
 fn prune_dead_keeps_recent_never_seen() {
     let (_dir, store) = open_temp_store();
-    let addr = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), port: 16111 };
+    let addr = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+        port: 16111,
+    };
     store.record_attempt(&addr, 1_000).unwrap();
     let removed = store.prune_dead(500).unwrap();
     assert_eq!(removed, 0);
@@ -98,7 +101,10 @@ fn prune_dead_keeps_recent_never_seen() {
 #[test]
 fn prune_dead_removes_old_never_seen() {
     let (_dir, store) = open_temp_store();
-    let addr = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)), port: 16111 };
+    let addr = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+        port: 16111,
+    };
     store.record_attempt(&addr, 100).unwrap();
     let removed = store.prune_dead(500).unwrap();
     assert_eq!(removed, 1);
@@ -108,7 +114,10 @@ fn prune_dead_removes_old_never_seen() {
 #[test]
 fn record_attempt_creates_stub() {
     let (_dir, store) = open_temp_store();
-    let addr = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), port: 16111 };
+    let addr = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+        port: 16111,
+    };
     let rec = store.record_attempt(&addr, 1234).unwrap();
     assert_eq!(rec.id, UNKNOWN_PEER_ID);
     assert_eq!(rec.address, addr);
@@ -134,7 +143,10 @@ fn record_attempt_preserves_existing_success_fields() {
 #[test]
 fn insert_stub_if_missing_creates_then_noops() {
     let (_dir, store) = open_temp_store();
-    let addr = NetAddress { ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)), port: 16111 };
+    let addr = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
+        port: 16111,
+    };
 
     assert!(store.insert_stub_if_missing(&addr, 100).unwrap());
     let r1 = store.get(&addr).unwrap().expect("stub present");

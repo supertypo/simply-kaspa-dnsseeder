@@ -17,9 +17,7 @@ use clap::Parser;
 use kaspa_consensus_core::network::NetworkId;
 use log::{error, info, warn};
 use simply_kaspa_dnsseeder_cli::CliArgs;
-use simply_kaspa_dnsseeder_crawler::{
-    KaspadProbe, ProbeInitializerConfig, Scheduler, SchedulerConfig, TokioResolver,
-};
+use simply_kaspa_dnsseeder_crawler::{KaspadProbe, ProbeInitializerConfig, Scheduler, SchedulerConfig, TokioResolver};
 use simply_kaspa_dnsseeder_dns::{DnsConfig, SeederHandler};
 use simply_kaspa_dnsseeder_store::PeerStore;
 use simply_kaspa_dnsseeder_web::{AppState, MetricsSource, SchedulerProber, WebConfig, run_web_server};
@@ -42,8 +40,8 @@ async fn main() {
 }
 
 async fn run(cli: CliArgs) -> Result<()> {
-    let network_id = NetworkId::from_str(&cli.network_id)
-        .map_err(|err| anyhow!("invalid --network-id `{}`: {err}", cli.network_id))?;
+    let network_id =
+        NetworkId::from_str(&cli.network_id).map_err(|err| anyhow!("invalid --network-id `{}`: {err}", cli.network_id))?;
 
     let datadir = prepare_datadir(&cli.datadir, network_id).await?;
     let store_path = datadir.join("peers.redb");
@@ -80,8 +78,10 @@ async fn run(cli: CliArgs) -> Result<()> {
     });
 
     let dns_task = if cli.dns_enabled() {
-        let dns_listen: SocketAddr =
-            cli.dns_listen.parse().with_context(|| format!("invalid --dns-listen `{}`", cli.dns_listen))?;
+        let dns_listen: SocketAddr = cli
+            .dns_listen
+            .parse()
+            .with_context(|| format!("invalid --dns-listen `{}`", cli.dns_listen))?;
         let dns_cfg = DnsConfig {
             stale_good: cli.stale_good,
             min_protocol_version: cli.min_protocol_version,
@@ -94,8 +94,7 @@ async fn run(cli: CliArgs) -> Result<()> {
             )
         };
         let tcp_idle = dns_cfg.tcp_idle_timeout;
-        let handler = SeederHandler::with_metrics(dns_cfg, store.clone(), metrics.dns.clone())
-            .context("building dns handler")?;
+        let handler = SeederHandler::with_metrics(dns_cfg, store.clone(), metrics.dns.clone()).context("building dns handler")?;
         let dns_shutdown = shutdown_tx.subscribe();
         Some(tokio::spawn(async move {
             match simply_kaspa_dnsseeder_dns::run_dns_server_with_handler(handler, dns_listen, tcp_idle, dns_shutdown).await {
@@ -108,8 +107,10 @@ async fn run(cli: CliArgs) -> Result<()> {
         None
     };
 
-    let http_listen: SocketAddr =
-        cli.http_listen.parse().with_context(|| format!("invalid --http-listen `{}`", cli.http_listen))?;
+    let http_listen: SocketAddr = cli
+        .http_listen
+        .parse()
+        .with_context(|| format!("invalid --http-listen `{}`", cli.http_listen))?;
     let web_cfg = WebConfig {
         listen: http_listen,
         api_key: cli.api_key.clone(),
@@ -169,7 +170,9 @@ async fn prepare_datadir(raw: &str, network_id: NetworkId) -> Result<PathBuf> {
     } else {
         base.join(network_id.to_string())
     };
-    tokio::fs::create_dir_all(&dir).await.with_context(|| format!("creating datadir {dir:?}"))?;
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .with_context(|| format!("creating datadir {dir:?}"))?;
     Ok(dir)
 }
 
@@ -179,7 +182,11 @@ fn configure_logging(cli: &CliArgs) {
         .format_target(false)
         .format_timestamp_millis()
         .parse_filters(&cli.log_level)
-        .write_style(if cli.log_no_color { env_logger::WriteStyle::Never } else { env_logger::WriteStyle::Always })
+        .write_style(if cli.log_no_color {
+            env_logger::WriteStyle::Never
+        } else {
+            env_logger::WriteStyle::Always
+        })
         .init();
 }
 
@@ -203,5 +210,3 @@ fn spawn_signal_handler(shutdown: broadcast::Sender<()>) {
         }
     });
 }
-
-

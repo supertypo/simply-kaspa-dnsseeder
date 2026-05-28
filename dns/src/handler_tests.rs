@@ -6,9 +6,9 @@ use std::time::Duration;
 use hickory_proto::op::{Message, MessageType, OpCode, Query, ResponseCode};
 use hickory_proto::rr::{DNSClass, Name, RecordType};
 use hickory_proto::serialize::binary::BinDecodable;
+use hickory_resolver::TokioResolver;
 use hickory_resolver::config::{NameServerConfig, ResolverConfig, ResolverOpts};
 use hickory_resolver::proto::xfer::Protocol;
-use hickory_resolver::TokioResolver;
 use kaspa_consensus_core::network::{NetworkId, NetworkType};
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 use tempfile::TempDir;
@@ -22,8 +22,13 @@ const APEX_FQDN: &str = "seeder.example.test.";
 const NS: &str = "ns.example.test";
 
 fn current_now_ms() -> i64 {
-    i64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis())
-        .expect("system clock fits in i64")
+    i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+    )
+    .expect("system clock fits in i64")
 }
 
 fn make_record(id: u8, ip: IpAddr, now_ms: i64) -> PeerRecord {
@@ -33,7 +38,10 @@ fn make_record(id: u8, ip: IpAddr, now_ms: i64) -> PeerRecord {
         id: peer_id,
         protocol_version: 7,
         timestamp_ms: now_ms,
-        address: NetAddress { ip, port: NetworkId::new(NetworkType::Mainnet).default_p2p_port() },
+        address: NetAddress {
+            ip,
+            port: NetworkId::new(NetworkType::Mainnet).default_p2p_port(),
+        },
         user_agent: "/kaspad:1.0.0/".to_string(),
         subnetwork_id: None,
         first_seen_ms: now_ms,
@@ -169,7 +177,10 @@ async fn refuses_non_apex_queries() {
     let res = resolver(server);
     let err = res.ipv4_lookup("other.example.test.").await.expect_err("must error");
     let msg = err.to_string().to_lowercase();
-    assert!(msg.contains("refused") || msg.contains("no records found"), "unexpected error: {msg}");
+    assert!(
+        msg.contains("refused") || msg.contains("no records found"),
+        "unexpected error: {msg}"
+    );
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
 }
@@ -271,7 +282,12 @@ async fn refuses_disallowed_qtypes() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let (server, _cfg, shutdown, handle) = start_server(store).await;
-    for (id, qtype) in [(10, RecordType::TXT), (11, RecordType::MX), (12, RecordType::CNAME), (13, RecordType::PTR)] {
+    for (id, qtype) in [
+        (10, RecordType::TXT),
+        (11, RecordType::MX),
+        (12, RecordType::CNAME),
+        (13, RecordType::PTR),
+    ] {
         let query = craft_query(APEX_FQDN, qtype, DNSClass::IN, id, OpCode::Query);
         let resp = send_raw_query(server, query, Duration::from_secs(1)).await.expect("must reply");
         assert_eq!(resp.response_code(), ResponseCode::Refused, "qtype {qtype:?} should be REFUSED");
@@ -319,8 +335,13 @@ async fn response_is_capped_and_randomized() {
     for i in 0..peer_count {
         store.upsert(&make_record(i, IpAddr::V4(Ipv4Addr::new(10, 0, 0, i)), now)).unwrap();
     }
-    let (server, cfg, shutdown, handle) =
-        start_server_with(|c| { c.max_records = cap; }, store).await;
+    let (server, cfg, shutdown, handle) = start_server_with(
+        |c| {
+            c.max_records = cap;
+        },
+        store,
+    )
+    .await;
     assert_eq!(cfg.max_records, cap);
 
     let mut seen_sets: Vec<HashSet<Ipv4Addr>> = Vec::new();
@@ -362,7 +383,9 @@ async fn rate_limit_drops_silently() {
     .await;
 
     let first = craft_query(APEX_FQDN, RecordType::A, DNSClass::IN, 200, OpCode::Query);
-    let resp = send_raw_query(server, first, Duration::from_secs(1)).await.expect("first must reply");
+    let resp = send_raw_query(server, first, Duration::from_secs(1))
+        .await
+        .expect("first must reply");
     assert_eq!(resp.response_code(), ResponseCode::NoError);
 
     let second = craft_query(APEX_FQDN, RecordType::A, DNSClass::IN, 201, OpCode::Query);
@@ -389,14 +412,23 @@ async fn response_fits_in_udp_mtu() {
         NS.to_string(),
     );
     let (server, _cfg, shutdown, handle) = start_server_with(
-        |c| { c.max_records = prod_defaults.max_records; },
+        |c| {
+            c.max_records = prod_defaults.max_records;
+        },
         store,
     )
     .await;
 
     let query = craft_query(APEX_FQDN, RecordType::A, DNSClass::IN, 300, OpCode::Query);
-    let bytes = send_raw_query_bytes(server, query, Duration::from_secs(1)).await.expect("must reply");
-    assert!(bytes.len() <= UDP_MTU, "response was {} bytes, exceeds UDP MTU {}", bytes.len(), UDP_MTU);
+    let bytes = send_raw_query_bytes(server, query, Duration::from_secs(1))
+        .await
+        .expect("must reply");
+    assert!(
+        bytes.len() <= UDP_MTU,
+        "response was {} bytes, exceeds UDP MTU {}",
+        bytes.len(),
+        UDP_MTU
+    );
 
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;

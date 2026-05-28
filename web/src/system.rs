@@ -21,7 +21,11 @@ pub(crate) async fn collect_process(system: &RwLock<System>) -> Value {
     let (cpu, mem_used) = sys
         .process(pid)
         .map_or((0.0_f32, 0_u64), |p| ((p.cpu_usage() * 10.0).round() / 10.0, p.memory()));
-    let mem_free = if sys.available_memory() > 0 { sys.available_memory() } else { sys.free_memory() };
+    let mem_free = if sys.available_memory() > 0 {
+        sys.available_memory()
+    } else {
+        sys.free_memory()
+    };
     json!({
         "cpu_used_percent": cpu,
         "memory_used_bytes": mem_used,

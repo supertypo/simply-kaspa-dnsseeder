@@ -61,7 +61,11 @@ pub(super) fn load(store: &PeerStore, crawler: &CrawlerMetrics, dns: &DnsMetrics
             return;
         }
     };
-    crawler.restore(&CrawlerSnapshot { ok: snap.crawler.ok, failed: snap.crawler.failed, in_flight: 0 });
+    crawler.restore(&CrawlerSnapshot {
+        ok: snap.crawler.ok,
+        failed: snap.crawler.failed,
+        in_flight: 0,
+    });
     dns.restore(&DnsSnapshot {
         answered: snap.dns.answered,
         empty: snap.dns.empty,
@@ -78,15 +82,12 @@ pub(super) fn load(store: &PeerStore, crawler: &CrawlerMetrics, dns: &DnsMetrics
     debug!("stats: restored snapshot persisted at {}", snap.persisted_at_ms);
 }
 
-pub(super) fn save(
-    store: &PeerStore,
-    crawler: &CrawlerSnapshot,
-    dns: &DnsSnapshot,
-    web: &WebSnapshot,
-    now_ms: i64,
-) {
+pub(super) fn save(store: &PeerStore, crawler: &CrawlerSnapshot, dns: &DnsSnapshot, web: &WebSnapshot, now_ms: i64) {
     let snap = MetricsSnapshot {
-        crawler: CrawlerSnap { ok: crawler.ok, failed: crawler.failed },
+        crawler: CrawlerSnap {
+            ok: crawler.ok,
+            failed: crawler.failed,
+        },
         dns: DnsSnap {
             answered: dns.answered,
             empty: dns.empty,
@@ -95,7 +96,11 @@ pub(super) fn save(
             a: dns.a,
             aaaa: dns.aaaa,
         },
-        web: WebSnap { requests: web.requests, accepted: web.accepted, rejected: web.rejected },
+        web: WebSnap {
+            requests: web.requests,
+            accepted: web.accepted,
+            rejected: web.rejected,
+        },
         persisted_at_ms: now_ms,
     };
     let bytes = match bincode::serde::encode_to_vec(&snap, bincode::config::standard()) {

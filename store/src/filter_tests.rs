@@ -73,7 +73,12 @@ fn stale_good_filter_only_affects_dns() {
         default_port: Some(16111),
     };
     assert!(!f.matches(&r), "should fail stale_good");
-    let f_http = Filter { stale_good_ms: None, family: None, default_port: None, ..f };
+    let f_http = Filter {
+        stale_good_ms: None,
+        family: None,
+        default_port: None,
+        ..f
+    };
     assert!(f_http.matches(&r));
 }
 
@@ -93,7 +98,10 @@ fn family_filter() {
     };
     assert!(base.matches(&r_v4));
     assert!(!base.matches(&r_v6));
-    let f6 = Filter { family: Some(Family::V6), ..base.clone() };
+    let f6 = Filter {
+        family: Some(Family::V6),
+        ..base.clone()
+    };
     assert!(f6.matches(&r_v6));
     assert!(!f6.matches(&r_v4));
 }
@@ -112,7 +120,10 @@ fn min_protocol_version_filter() {
         default_port: None,
     };
     assert!(!f.matches(&r));
-    let f_ok = Filter { min_protocol_version: Some(7), ..f };
+    let f_ok = Filter {
+        min_protocol_version: Some(7),
+        ..f
+    };
     assert!(f_ok.matches(&r));
 }
 
@@ -130,7 +141,10 @@ fn min_user_agent_filter() {
         default_port: None,
     };
     assert!(!f.matches(&r));
-    let f_ok = Filter { min_user_agent: Some(Version::new(1, 0, 0)), ..f };
+    let f_ok = Filter {
+        min_user_agent: Some(Version::new(1, 0, 0)),
+        ..f
+    };
     assert!(f_ok.matches(&r));
 }
 

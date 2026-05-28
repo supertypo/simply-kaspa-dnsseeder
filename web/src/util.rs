@@ -48,5 +48,9 @@ pub(crate) fn normalize_prefix(raw: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    if trimmed.starts_with('/') { trimmed.to_string() } else { format!("/{trimmed}") }
+    if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    }
 }

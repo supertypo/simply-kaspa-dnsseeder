@@ -45,17 +45,16 @@ pub(crate) async fn list(State(state): State<AppState>, headers: HeaderMap) -> R
     Json(dtos).into_response()
 }
 
-pub(crate) async fn get(
-    State(state): State<AppState>,
-    Path(addr_str): Path<String>,
-    headers: HeaderMap,
-) -> Response {
+pub(crate) async fn get(State(state): State<AppState>, Path(addr_str): Path<String>, headers: HeaderMap) -> Response {
     state.metrics.record_request();
     let addr = match SocketAddr::from_str(&addr_str) {
         Ok(a) => a,
         Err(err) => return (StatusCode::BAD_REQUEST, format!("addr must be ip:port — {err}")).into_response(),
     };
-    let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+    let net = NetAddress {
+        ip: canonicalize_ip(addr.ip()),
+        port: addr.port(),
+    };
     match state.store.get(&net) {
         Ok(Some(rec)) => {
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
@@ -106,10 +105,17 @@ pub(crate) async fn submit(
         }
     };
 
-    let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+    let net = NetAddress {
+        ip: canonicalize_ip(addr.ip()),
+        port: addr.port(),
+    };
     if !is_acceptable_address(&net, state.config.network_default_port, state.config.strict_port) {
         state.metrics.record_rejected();
-        return (StatusCode::BAD_REQUEST, "address is not publicly routable or uses a disallowed port").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "address is not publicly routable or uses a disallowed port",
+        )
+            .into_response();
     }
     let addr = SocketAddr::new(net.ip, net.port);
 
@@ -118,7 +124,11 @@ pub(crate) async fn submit(
             state.metrics.record_accepted();
             debug!("web: POST /peers accepted {addr} (probe ok)");
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
-            (StatusCode::OK, Json(PeerDto::from_record(&rec, expose, state.config.network_default_port))).into_response()
+            (
+                StatusCode::OK,
+                Json(PeerDto::from_record(&rec, expose, state.config.network_default_port)),
+            )
+                .into_response()
         }
         Err(err) => {
             state.metrics.record_rejected();

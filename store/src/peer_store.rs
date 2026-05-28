@@ -219,7 +219,11 @@ impl PeerStore {
                 Err(e) => warn!("store: skipping corrupt record: {e}"),
             }
         }
-        debug!("store: collect_matching family={:?} scanned={total} matched={}", filter.family, out.len());
+        debug!(
+            "store: collect_matching family={:?} scanned={total} matched={}",
+            filter.family,
+            out.len()
+        );
         Ok(out)
     }
 

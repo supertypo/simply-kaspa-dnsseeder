@@ -8,9 +8,7 @@ use kaspa_p2p_lib::common::ProtocolError;
 use kaspa_p2p_lib::pb::{
     self, AddressesMessage, ReadyMessage, RequestAddressesMessage, VerackMessage, VersionMessage, kaspad_message::Payload,
 };
-use kaspa_p2p_lib::{
-    ConnectionInitializer, IncomingRoute, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message,
-};
+use kaspa_p2p_lib::{ConnectionInitializer, IncomingRoute, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message};
 use kaspa_utils::networking::{IpAddress, PeerId};
 use log::{debug, info, trace, warn};
 use tokio::sync::oneshot;
@@ -33,10 +31,7 @@ pub struct ProbeInitializerConfig {
 
 impl ProbeInitializerConfig {
     #[must_use]
-    pub fn new(
-        network_id: kaspa_consensus_core::network::NetworkId,
-        probe_timeout: Duration,
-    ) -> Self {
+    pub fn new(network_id: kaspa_consensus_core::network::NetworkId, probe_timeout: Duration) -> Self {
         Self { network_id, probe_timeout }
     }
 }
@@ -108,8 +103,7 @@ impl ProbeInitializer {
         router.enqueue(make_message!(Payload::Ready, ReadyMessage {})).await?;
         let _ready: ReadyMessage = dequeue_with_timeout!(ready_route, Payload::Ready, timeout)?;
 
-        let _peer_req: RequestAddressesMessage =
-            dequeue_with_timeout!(request_addr_route, Payload::RequestAddresses, timeout)?;
+        let _peer_req: RequestAddressesMessage = dequeue_with_timeout!(request_addr_route, Payload::RequestAddresses, timeout)?;
         router
             .enqueue(make_message!(Payload::Addresses, pb::AddressesMessage { address_list: vec![] }))
             .await?;
@@ -117,7 +111,10 @@ impl ProbeInitializer {
         router
             .enqueue(make_message!(
                 Payload::RequestAddresses,
-                RequestAddressesMessage { include_all_subnetworks: true, subnetwork_id: None }
+                RequestAddressesMessage {
+                    include_all_subnetworks: true,
+                    subnetwork_id: None
+                }
             ))
             .await?;
 
@@ -129,7 +126,11 @@ impl ProbeInitializer {
                 address_list.len(),
             )));
         }
-        info!("crawler: probe {}: received {} address(es)", router.net_address(), address_list.len());
+        info!(
+            "crawler: probe {}: received {} address(es)",
+            router.net_address(),
+            address_list.len()
+        );
         trace!("crawler: probe {}: addresses = {:?}", router.net_address(), address_list);
 
         // Keep all route receivers alive until the router shuts down. If they
@@ -146,7 +147,10 @@ impl ProbeInitializer {
             drain_route,
         ]);
 
-        Ok(ProbeResult { version: peer_version, addresses: address_list })
+        Ok(ProbeResult {
+            version: peer_version,
+            addresses: address_list,
+        })
     }
 }
 
@@ -243,9 +247,6 @@ pub(crate) fn drain_payload_types() -> Vec<KaspadMessagePayloadType> {
 /// after a successful probe.
 fn spawn_route_drain(routes: Vec<IncomingRoute>) {
     for mut route in routes {
-        tokio::spawn(async move {
-            while route.recv().await.is_some() {}
-        });
+        tokio::spawn(async move { while route.recv().await.is_some() {} });
     }
 }
-

@@ -97,7 +97,15 @@ impl Scheduler {
         metrics: Arc<CrawlerMetrics>,
     ) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.threads.max(1)));
-        Self { config, store, probe, resolver, in_flight: Arc::new(DashSet::new()), semaphore, metrics }
+        Self {
+            config,
+            store,
+            probe,
+            resolver,
+            in_flight: Arc::new(DashSet::new()),
+            semaphore,
+            metrics,
+        }
     }
 
     #[must_use]
@@ -148,7 +156,10 @@ impl Scheduler {
         }
 
         let bootstrap_addrs = if self.config.seeders.is_empty() {
-            info!("crawler: bootstrapping from built-in dns seeders for network {}", self.config.network_id);
+            info!(
+                "crawler: bootstrapping from built-in dns seeders for network {}",
+                self.config.network_id
+            );
             dns_seed_many(self.config.network_id, self.resolver.clone()).await
         } else {
             info!("crawler: bootstrapping from --seeder hosts: {:?}", self.config.seeders);
@@ -159,7 +170,10 @@ impl Scheduler {
         let now = now_ms();
         let mut inserted = 0usize;
         for addr in bootstrap_addrs {
-            let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+            let net = NetAddress {
+                ip: canonicalize_ip(addr.ip()),
+                port: addr.port(),
+            };
             if !is_acceptable_address(&net, default_port, self.config.strict_port) {
                 debug!("crawler: rejected bootstrap address {addr}");
                 continue;
@@ -197,9 +211,7 @@ impl Scheduler {
         let in_flight_cap = threads.saturating_mul(MAX_IN_FLIGHT_PER_THREAD);
         let current_in_flight = self.in_flight.len();
         if current_in_flight >= in_flight_cap {
-            debug!(
-                "crawler: probe tick skipped (in_flight={current_in_flight} >= cap={in_flight_cap})"
-            );
+            debug!("crawler: probe tick skipped (in_flight={current_in_flight} >= cap={in_flight_cap})");
             return Ok(());
         }
 
@@ -224,7 +236,10 @@ impl Scheduler {
 
         let eligible_count = eligible.len();
         if eligible.is_empty() {
-            debug!("crawler: probe tick (scanned={total}, eligible=0, dispatched=0, in_flight={})", self.in_flight.len());
+            debug!(
+                "crawler: probe tick (scanned={total}, eligible=0, dispatched=0, in_flight={})",
+                self.in_flight.len()
+            );
             return Ok(());
         }
 
@@ -329,13 +344,7 @@ impl Scheduler {
 /// - It is not past the dead cutoff (matches `prune_dead`'s criterion).
 /// - If it has ever succeeded, `last_attempt` is at least `stale_good_ms` old.
 /// - If it has never succeeded, `last_attempt` is at least `stale_bad_ms` old.
-pub(crate) fn is_eligible(
-    rec: &PeerRecord,
-    now_ms: i64,
-    stale_good_ms: i64,
-    stale_bad_ms: i64,
-    dead_cutoff_ms: i64,
-) -> bool {
+pub(crate) fn is_eligible(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, stale_bad_ms: i64, dead_cutoff_ms: i64) -> bool {
     if rec.last_seen_ms < dead_cutoff_ms && rec.first_seen_ms < dead_cutoff_ms {
         return false;
     }
@@ -344,8 +353,15 @@ pub(crate) fn is_eligible(
     since_attempt >= threshold
 }
 
-fn apply_success(store: &PeerStore, addr: SocketAddr, result: &ProbeResult) -> Result<PeerRecord, simply_kaspa_dnsseeder_store::Error> {
-    let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+fn apply_success(
+    store: &PeerStore,
+    addr: SocketAddr,
+    result: &ProbeResult,
+) -> Result<PeerRecord, simply_kaspa_dnsseeder_store::Error> {
+    let net = NetAddress {
+        ip: canonicalize_ip(addr.ip()),
+        port: addr.port(),
+    };
     let existing = store.get(&net)?;
     let record = peer_record_from_version(addr, &result.version, now_ms(), existing.as_ref());
     store.upsert(&record)?;
@@ -353,7 +369,10 @@ fn apply_success(store: &PeerStore, addr: SocketAddr, result: &ProbeResult) -> R
 }
 
 fn bump_attempt(store: &PeerStore, addr: SocketAddr) -> Result<(), simply_kaspa_dnsseeder_store::Error> {
-    let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+    let net = NetAddress {
+        ip: canonicalize_ip(addr.ip()),
+        port: addr.port(),
+    };
     store.record_attempt(&net, now_ms()).map(|_| ())
 }
 
@@ -368,8 +387,7 @@ impl Scheduler {
         addr: SocketAddr,
     ) -> Result<PeerRecord, crate::error::ProbeError> {
         match probe.probe(addr).await {
-            Ok(result) => apply_success(store, addr, &result)
-                .map_err(|e| crate::error::ProbeError::Connection(e.to_string())),
+            Ok(result) => apply_success(store, addr, &result).map_err(|e| crate::error::ProbeError::Connection(e.to_string())),
             Err(err) => {
                 let _ = bump_attempt(store, addr);
                 Err(err)

@@ -90,9 +90,16 @@ fn drain_covers_every_non_handshake_payload_type() {
     let all: HashSet<_> = all_payload_types().into_iter().collect();
 
     // Sanity: our local enum mirror matches the upstream count.
-    assert_eq!(all.len(), 49, "rusty-kaspa added/removed a payload variant; update all_payload_types()");
+    assert_eq!(
+        all.len(),
+        49,
+        "rusty-kaspa added/removed a payload variant; update all_payload_types()"
+    );
 
     let union: HashSet<_> = drain.union(&handshake).copied().collect();
     let missing: Vec<_> = all.difference(&union).copied().collect();
-    assert!(missing.is_empty(), "drain_payload_types does not cover all non-handshake variants; missing: {missing:?}");
+    assert!(
+        missing.is_empty(),
+        "drain_payload_types does not cover all non-handshake variants; missing: {missing:?}"
+    );
 }

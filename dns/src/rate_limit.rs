@@ -25,7 +25,12 @@ struct Bucket {
 impl RateLimiter {
     #[must_use]
     pub fn new(capacity: u32, window: Duration) -> Self {
-        Self { capacity, window, buckets: DashMap::new(), ops: AtomicU64::new(0) }
+        Self {
+            capacity,
+            window,
+            buckets: DashMap::new(),
+            ops: AtomicU64::new(0),
+        }
     }
 
     #[must_use]
@@ -35,7 +40,10 @@ impl RateLimiter {
         }
         let now = Instant::now();
         let allowed = {
-            let mut entry = self.buckets.entry(ip).or_insert(Bucket { tokens: self.capacity, refill_at: now + self.window });
+            let mut entry = self.buckets.entry(ip).or_insert(Bucket {
+                tokens: self.capacity,
+                refill_at: now + self.window,
+            });
             if now >= entry.refill_at {
                 entry.tokens = self.capacity;
                 entry.refill_at = now + self.window;
@@ -72,4 +80,3 @@ impl RateLimiter {
         self.sweep(Instant::now());
     }
 }
-

@@ -12,7 +12,10 @@ fn rec_with_ua(ua: &str) -> PeerRecord {
         id: [0x11; 16],
         protocol_version: 7,
         timestamp_ms: 0,
-        address: NetAddress { ip: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), port: 16111 },
+        address: NetAddress {
+            ip: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
+            port: 16111,
+        },
         user_agent: ua.to_string(),
         subnetwork_id: None,
         first_seen_ms: 1_700_000_000_000,
@@ -30,8 +33,17 @@ fn public_view_exposes_only_anonymous_fields() {
     let obj = json.as_object().expect("object");
 
     let keys: std::collections::BTreeSet<&str> = obj.keys().map(String::as_str).collect();
-    let expected: std::collections::BTreeSet<&str> =
-        ["protocolVersion", "userAgent", "kaspadVersion", "port", "defaultPort", "lastSeenMs", "lastSeen"].into_iter().collect();
+    let expected: std::collections::BTreeSet<&str> = [
+        "protocolVersion",
+        "userAgent",
+        "kaspadVersion",
+        "port",
+        "defaultPort",
+        "lastSeenMs",
+        "lastSeen",
+    ]
+    .into_iter()
+    .collect();
     assert_eq!(keys, expected);
     assert_eq!(obj["port"], 16111);
     assert_eq!(obj["protocolVersion"], 7);

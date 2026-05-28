@@ -30,17 +30,73 @@ pub(super) struct Block {
 pub(super) fn render(b: &Block) -> Vec<String> {
     let mut out = Vec::with_capacity(16);
     out.push(RULE_TOP.to_string());
-    out.push(row("node", "up", &uptime(b.uptime), "network", &b.network.to_string(), "version", b.version));
+    out.push(row(
+        "node",
+        "up",
+        &uptime(b.uptime),
+        "network",
+        &b.network.to_string(),
+        "version",
+        b.version,
+    ));
     out.push(RULE_MID.to_string());
-    out.push(row("peers", "good", &count(b.summary_good), "failed", &count(b.summary_failed), "total", &count(b.summary_total)));
-    out.push(row("", "v4", &count(b.summary_v4), "v6", &count(b.summary_v6), "avg-age", &age(b.avg_age)));
+    out.push(row(
+        "peers",
+        "good",
+        &count(b.summary_good),
+        "failed",
+        &count(b.summary_failed),
+        "total",
+        &count(b.summary_total),
+    ));
+    out.push(row(
+        "",
+        "v4",
+        &count(b.summary_v4),
+        "v6",
+        &count(b.summary_v6),
+        "avg-age",
+        &age(b.avg_age),
+    ));
     out.push(RULE_MID.to_string());
-    out.push(row("crawler", "ok", &count(b.crawler.ok), "failed", &count(b.crawler.failed), "in-flight", &count(b.crawler.in_flight)));
+    out.push(row(
+        "crawler",
+        "ok",
+        &count(b.crawler.ok),
+        "failed",
+        &count(b.crawler.failed),
+        "in-flight",
+        &count(b.crawler.in_flight),
+    ));
     out.push(RULE_MID.to_string());
-    out.push(row("dns", "answered", &count(b.dns.answered), "empty", &count(b.dns.empty), "refused", &count(b.dns.refused)));
-    out.push(row("", "A", &count(b.dns.a), "AAAA", &count(b.dns.aaaa), "throttled", &count(b.dns.throttled)));
+    out.push(row(
+        "dns",
+        "answered",
+        &count(b.dns.answered),
+        "empty",
+        &count(b.dns.empty),
+        "refused",
+        &count(b.dns.refused),
+    ));
+    out.push(row(
+        "",
+        "A",
+        &count(b.dns.a),
+        "AAAA",
+        &count(b.dns.aaaa),
+        "throttled",
+        &count(b.dns.throttled),
+    ));
     out.push(RULE_MID.to_string());
-    out.push(row("web", "requests", &count(b.web.requests), "accepted", &count(b.web.accepted), "rejected", &count(b.web.rejected)));
+    out.push(row(
+        "web",
+        "requests",
+        &count(b.web.requests),
+        "accepted",
+        &count(b.web.accepted),
+        "rejected",
+        &count(b.web.rejected),
+    ));
     out.push(RULE_TOP.to_string());
     out
 }

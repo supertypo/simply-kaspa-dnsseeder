@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode};
 use simply_kaspa_dnsseeder_crawler::ProbeError;
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
@@ -31,7 +31,10 @@ impl Prober for MockProber {
             id,
             protocol_version: 7,
             timestamp_ms: 0,
-            address: NetAddress { ip: addr.ip(), port: addr.port() },
+            address: NetAddress {
+                ip: addr.ip(),
+                port: addr.port(),
+            },
             user_agent: "/mock:1.0.0/".to_string(),
             subnetwork_id: None,
             first_seen_ms: 1,
@@ -70,7 +73,10 @@ fn seeded_store() -> (TempDir, PeerStore) {
             id,
             protocol_version: 7,
             timestamp_ms: 0,
-            address: NetAddress { ip: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), port: 16111 },
+            address: NetAddress {
+                ip: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
+                port: 16111,
+            },
             user_agent: "/kaspad:1.0.0/".to_string(),
             subnetwork_id: None,
             first_seen_ms: 100,
@@ -101,7 +107,11 @@ async fn list_peers_strips_ip_when_api_key_set() {
     let app = build_router(state);
 
     // No api key header → ip omitted.
-    let res = app.clone().oneshot(Request::get("/peers").body(Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(Request::get("/peers").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -134,7 +144,10 @@ async fn get_peer_returns_404_when_missing() {
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let state = make_state(Arc::new(MockProber::default()), store, None);
     let app = build_router(state);
-    let res = app.oneshot(Request::get("/peers/9.9.9.9:16111").body(Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .oneshot(Request::get("/peers/9.9.9.9:16111").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
@@ -143,7 +156,10 @@ async fn get_peer_returns_record_by_addr() {
     let (_temp, store) = seeded_store();
     let state = make_state(Arc::new(MockProber::default()), store, None);
     let app = build_router(state);
-    let res = app.oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
@@ -157,7 +173,10 @@ async fn get_peer_returns_400_on_bad_addr() {
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let state = make_state(Arc::new(MockProber::default()), store, None);
     let app = build_router(state);
-    let res = app.oneshot(Request::get("/peers/not-an-addr").body(Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .oneshot(Request::get("/peers/not-an-addr").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
@@ -244,7 +263,13 @@ async fn rate_limit_blocks_repeated_posts() {
     let mut svc = app;
     let mut conn = svc.call(SocketAddr::from_str("127.0.0.1:1234").unwrap()).await.unwrap();
 
-    let req = || Request::builder().method(Method::POST).uri("/peers").body(Body::from("9.9.9.9:16111")).unwrap();
+    let req = || {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/peers")
+            .body(Body::from("9.9.9.9:16111"))
+            .unwrap()
+    };
 
     let first = conn.call(req()).await.unwrap();
     assert_eq!(first.status(), StatusCode::OK);
@@ -258,7 +283,10 @@ async fn get_peer_includes_default_port_true() {
     let (_temp, store) = seeded_store();
     let state = make_state(Arc::new(MockProber::default()), store, None);
     let app = build_router(state);
-    let res = app.oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["defaultPort"], true);
@@ -274,10 +302,21 @@ async fn list_peers_uses_camel_case_keys() {
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let entry = &json[0];
-    for key in ["protocolVersion", "userAgent", "lastSeenMs", "firstSeenMs", "defaultPort", "ip", "port"] {
+    for key in [
+        "protocolVersion",
+        "userAgent",
+        "lastSeenMs",
+        "firstSeenMs",
+        "defaultPort",
+        "ip",
+        "port",
+    ] {
         assert!(entry.get(key).is_some(), "missing camelCase field `{key}` in {entry}");
     }
-    assert!(entry.get("protocol_version").is_none(), "stale snake_case `protocol_version` still present");
+    assert!(
+        entry.get("protocol_version").is_none(),
+        "stale snake_case `protocol_version` still present"
+    );
 }
 
 #[tokio::test]

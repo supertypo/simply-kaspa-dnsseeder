@@ -85,12 +85,7 @@ impl Metrics {
     }
 }
 
-pub async fn stats_loop(
-    metrics: Arc<Metrics>,
-    store: PeerStore,
-    interval: Duration,
-    mut shutdown: broadcast::Receiver<()>,
-) {
+pub async fn stats_loop(metrics: Arc<Metrics>, store: PeerStore, interval: Duration, mut shutdown: broadcast::Receiver<()>) {
     if interval.is_zero() {
         return;
     }

@@ -25,23 +25,37 @@ pub enum Error {
 }
 
 impl From<redb::Error> for Error {
-    fn from(e: redb::Error) -> Self { Self::Redb(Box::new(e)) }
+    fn from(e: redb::Error) -> Self {
+        Self::Redb(Box::new(e))
+    }
 }
 impl From<redb::TransactionError> for Error {
-    fn from(e: redb::TransactionError) -> Self { Self::Transaction(Box::new(e)) }
+    fn from(e: redb::TransactionError) -> Self {
+        Self::Transaction(Box::new(e))
+    }
 }
 impl From<redb::TableError> for Error {
-    fn from(e: redb::TableError) -> Self { Self::Table(Box::new(e)) }
+    fn from(e: redb::TableError) -> Self {
+        Self::Table(Box::new(e))
+    }
 }
 impl From<redb::StorageError> for Error {
-    fn from(e: redb::StorageError) -> Self { Self::Storage(Box::new(e)) }
+    fn from(e: redb::StorageError) -> Self {
+        Self::Storage(Box::new(e))
+    }
 }
 impl From<redb::CommitError> for Error {
-    fn from(e: redb::CommitError) -> Self { Self::Commit(Box::new(e)) }
+    fn from(e: redb::CommitError) -> Self {
+        Self::Commit(Box::new(e))
+    }
 }
 impl From<redb::DatabaseError> for Error {
-    fn from(e: redb::DatabaseError) -> Self { Self::Database(Box::new(e)) }
+    fn from(e: redb::DatabaseError) -> Self {
+        Self::Database(Box::new(e))
+    }
 }
 impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self { Self::Io(Box::new(e)) }
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(Box::new(e))
+    }
 }

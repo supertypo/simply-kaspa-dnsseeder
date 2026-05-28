@@ -31,7 +31,10 @@ async fn timeout_returns_within_budget_and_cleans_pending() {
     let elapsed = start.elapsed();
 
     assert!(res.is_err(), "expected error against a black-hole listener, got {res:?}");
-    assert!(elapsed < Duration::from_secs(4), "probe took {elapsed:?}; must return within probe_timeout + TERMINATE_GRACE + slack");
+    assert!(
+        elapsed < Duration::from_secs(4),
+        "probe took {elapsed:?}; must return within probe_timeout + TERMINATE_GRACE + slack"
+    );
     assert_eq!(probe.pending_len(), 0, "pending map leaked entries");
 }
 
