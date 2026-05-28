@@ -19,6 +19,8 @@ const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 #[async_trait]
 pub trait Probe: Send + Sync {
     async fn probe(&self, addr: SocketAddr) -> Result<ProbeResult, ProbeError>;
+    /// Terminate all in-flight peer connections owned by the probe. Default is a no-op.
+    async fn close(&self) {}
 }
 
 pub struct KaspadProbe {
@@ -89,5 +91,9 @@ impl Probe for KaspadProbe {
                 Err(ProbeError::Timeout)
             }
         }
+    }
+
+    async fn close(&self) {
+        self.adaptor.close().await;
     }
 }

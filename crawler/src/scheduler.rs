@@ -34,8 +34,6 @@ const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 /// Per-host timeout for `--seeder` lookups. Mirrors the built-in DNS-seeder
 /// timeout so a single dead host can't stall bootstrap indefinitely.
 const SEEDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
-/// Time an in-flight probe gets to wind down cleanly after shutdown fires.
-const SHUTDOWN_PROBE_GRACE: Duration = Duration::from_secs(3);
 
 /// Static configuration for the scheduler.
 #[derive(Debug, Clone)]
@@ -80,8 +78,8 @@ pub struct Scheduler {
     cancel: CancellationToken,
 }
 
-/// Bundle of `Arc`s and clones a single probe task needs. Lets the dispatch
-/// loop hand off a single value to `tokio::spawn` instead of five.
+/// Bundle of clones a single probe task needs so the dispatch loop can
+/// hand off one value to `tokio::spawn`.
 struct ProbeTaskCtx {
     probe: Arc<dyn Probe>,
     store: PeerStore,
@@ -146,6 +144,7 @@ impl Scheduler {
                 _ = shutdown.recv() => {
                     info!("crawler: shutdown signal received");
                     self.cancel.cancel();
+                    self.probe.close().await;
                     break;
                 }
                 _ = probe_ticker.tick() => {
@@ -363,16 +362,19 @@ async fn run_probe_task(ctx: ProbeTaskCtx, addr: SocketAddr, default_port: u16, 
     }
     let ProbeTaskCtx { probe, store, in_flight, semaphore, metrics, cancel } = ctx;
     let mut guard = InFlightGuard { addr, in_flight, metrics: metrics.clone(), armed: false };
-    let Ok(_permit) = semaphore.acquire_owned().await else { return };
+    let _permit = tokio::select! {
+        permit = semaphore.acquire_owned() => match permit {
+            Ok(p) => p,
+            Err(_) => return,
+        },
+        () = cancel.cancelled() => return,
+    };
     metrics.in_flight_inc();
     guard.armed = true;
-    let mut probe_fut = std::pin::pin!(Scheduler::probe_one(probe.as_ref(), &store, addr, default_port, strict_port, Some(&metrics)));
     tokio::select! {
-        () = &mut probe_fut => {}
+        () = Scheduler::probe_one(probe.as_ref(), &store, addr, default_port, strict_port, Some(&metrics)) => {}
         () = cancel.cancelled() => {
-            if tokio::time::timeout(SHUTDOWN_PROBE_GRACE, probe_fut).await.is_err() {
-                debug!("crawler: probe {addr} dropped after {SHUTDOWN_PROBE_GRACE:?} shutdown grace");
-            }
+            debug!("crawler: probe {addr} dropped on shutdown");
         }
     }
 }
