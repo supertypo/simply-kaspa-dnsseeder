@@ -22,7 +22,9 @@ pub struct StoreSummary {
     pub total: u64,
     pub good: u64,
     pub failed: u64,
+    /// Count of good IPv4 peers (subset of `good`).
     pub v4: u64,
+    /// Count of good IPv6 peers (subset of `good`).
     pub v6: u64,
     /// Average age in ms of `last_success_ms` across the `good` subset. Zero when `good == 0`.
     pub avg_success_age_ms: u64,
@@ -275,6 +277,7 @@ impl PeerStore {
 
     /// Compute an aggregate summary of all stored peers in a single read pass.
     /// A peer is "good" iff `last_success_ms > 0` and `now_ms - last_success_ms <= stale_good_ms`.
+    /// `v4` / `v6` count only the "good" subset.
     pub fn summary(&self, now_ms: i64, stale_good_ms: i64) -> Result<StoreSummary, Error> {
         let mut s = StoreSummary::default();
         let mut sum_age_ms: u128 = 0;
@@ -284,10 +287,6 @@ impl PeerStore {
             let (_, v) = entry?;
             let Ok(rec) = decode_record(v.value()) else { continue };
             s.total += 1;
-            match rec.address.ip {
-                IpAddr::V4(_) => s.v4 += 1,
-                IpAddr::V6(_) => s.v6 += 1,
-            }
             if rec.last_success_ms <= 0 {
                 s.failed += 1;
                 continue;
@@ -295,6 +294,10 @@ impl PeerStore {
             let age = now_ms.saturating_sub(rec.last_success_ms);
             if age <= stale_good_ms {
                 s.good += 1;
+                match rec.address.ip {
+                    IpAddr::V4(_) => s.v4 += 1,
+                    IpAddr::V6(_) => s.v6 += 1,
+                }
                 if age > 0 {
                     sum_age_ms += u128::from(u64::try_from(age).unwrap_or(0));
                 }
