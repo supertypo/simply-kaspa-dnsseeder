@@ -17,6 +17,10 @@ pub mod seeders;
 #[cfg(test)]
 mod model_tests;
 #[cfg(test)]
+mod probe_initializer_tests;
+#[cfg(test)]
+mod probe_tests;
+#[cfg(test)]
 mod scheduler_tests;
 #[cfg(test)]
 mod seeders_tests;

@@ -15,6 +15,8 @@ pub mod server;
 
 #[cfg(test)]
 mod handler_tests;
+#[cfg(test)]
+mod rate_limit_tests;
 
 pub use config::DnsConfig;
 pub use error::Error;

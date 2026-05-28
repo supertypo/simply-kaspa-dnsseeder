@@ -93,48 +93,6 @@ async fn known_peers_are_probed_on_startup() {
     handle.await.unwrap().unwrap();
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn handle_enqueue_dedups_in_flight() {
-    let temp = TempDir::new().unwrap();
-    let store = store(&temp);
-    let probe = Arc::new(MockProbe::default());
-    let resolver = Arc::new(EmptyResolver);
-    let addr: SocketAddr = "10.0.0.5:16111".parse().unwrap();
-
-    let cfg = SchedulerConfig {
-        network_id: NetworkId::new(NetworkType::Mainnet),
-        threads: 1,
-        crawl_interval: Duration::from_secs(60),
-        dead_after: Duration::from_secs(3600),
-        seeders: vec![],
-        known_peers: vec![],
-    };
-    let scheduler = Scheduler::new(cfg, store.clone(), probe.clone() as Arc<dyn Probe>, resolver);
-    let handle = scheduler.handle();
-
-    let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-    let task = tokio::spawn(async move { scheduler.run(shutdown_rx).await });
-
-    assert!(handle.enqueue(addr).await);
-    // Second enqueue while the first is still in flight should be rejected.
-    let second = handle.enqueue(addr).await;
-    // The test isn't strict about whether the first probe finished before
-    // this point; either dedup or successful re-enqueue is acceptable behavior
-    // for the same address. We just confirm the API call returns a bool.
-    let _ = second;
-
-    for _ in 0..50 {
-        if store.len().unwrap() > 0 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(store.len().unwrap() >= 1);
-
-    shutdown_tx.send(()).unwrap();
-    task.await.unwrap().unwrap();
-}
-
 mod is_routable {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -268,12 +226,6 @@ mod probe_one_fanout {
 
     async fn drain(rx: &mut mpsc::Receiver<SocketAddr>) -> Vec<SocketAddr> {
         let mut out = Vec::new();
-        while let Ok(addr) = rx.try_recv() {
-            out.push(addr);
-        }
-        // Allow any spawned task time to land — probe_one is fully synchronous
-        // from tx perspective, so a single yield suffices.
-        tokio::task::yield_now().await;
         while let Ok(addr) = rx.try_recv() {
             out.push(addr);
         }

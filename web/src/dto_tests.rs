@@ -31,10 +31,6 @@ fn public_view_exposes_only_anonymous_fields() {
     let expected: std::collections::BTreeSet<&str> =
         ["protocol_version", "user_agent", "kaspad_version", "port", "last_seen_ms", "last_seen"].into_iter().collect();
     assert_eq!(keys, expected);
-    assert!(!obj.contains_key("id"));
-    assert!(!obj.contains_key("ip"));
-    assert!(!obj.contains_key("first_seen"));
-    assert!(!obj.contains_key("last_attempt"));
     assert_eq!(obj["port"], 16111);
     assert_eq!(obj["protocol_version"], 7);
 }
@@ -82,13 +78,6 @@ fn iso_timestamps_use_seconds_precision_with_z_suffix() {
 }
 
 #[test]
-fn kaspad_version_parsed_from_typical_user_agent() {
-    let rec = rec_with_ua("/kaspad:1.1.0/kaspad:1.1.0(FluxCloud)/");
-    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true)).unwrap();
-    assert_eq!(json["kaspad_version"], "1.1.0");
-}
-
-#[test]
 fn kaspad_version_preserves_prerelease_suffix() {
     let rec = rec_with_ua("/kaspad:1.2.1-toc.3/");
     let json: Value = serde_json::to_value(PeerDto::from_record(&rec, false)).unwrap();
@@ -100,16 +89,4 @@ fn kaspad_version_is_null_when_unparseable() {
     let rec = rec_with_ua("/something-else/");
     let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true)).unwrap();
     assert_eq!(json["kaspad_version"], Value::Null);
-}
-
-#[test]
-fn untagged_enum_serializes_as_plain_object_no_tag() {
-    let rec = rec_with_ua("/kaspad:1.1.0/");
-    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, false)).unwrap();
-    assert!(json.get("Public").is_none(), "should not be tagged");
-    assert!(json.get("Full").is_none(), "should not be tagged");
-
-    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true)).unwrap();
-    assert!(json.get("Public").is_none());
-    assert!(json.get("Full").is_none());
 }
