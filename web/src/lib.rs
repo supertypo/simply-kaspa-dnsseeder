@@ -12,6 +12,7 @@ pub mod error;
 mod handlers;
 pub mod metrics;
 pub mod metrics_source;
+mod peers_cache;
 pub mod prober;
 pub mod router;
 pub mod server;

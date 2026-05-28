@@ -21,6 +21,7 @@ hex.workspace = true
 semver.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -3187,6 +3187,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "uuid",
 ]
 
@@ -3227,6 +3228,7 @@ dependencies = [
  "simply-kaspa-dnsseeder-common",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
 ]
 
 [[package]]

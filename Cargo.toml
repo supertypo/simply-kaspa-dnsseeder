@@ -44,6 +44,7 @@ kaspa-utils-tower = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag =
 
 # Async runtime + utilities
 tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
 futures = "0.3"
 async-trait = "0.1"
 parking_lot = "0.12"

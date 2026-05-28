@@ -53,8 +53,13 @@ pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {
 
 pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>, headers: HeaderMap) -> Response {
     state.metrics.record_request();
+    let expose = expose_ip(&headers, state.config.api_key.as_deref());
+    let cache_key = crate::peers_cache::Key { all: q.all, expose };
+    if let Some(body) = state.peers_cache.get(cache_key) {
+        return ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response();
+    }
     let filter = list_filter(&state.config, q.all);
-    let mut records = match state.store.collect_matching(&filter) {
+    let mut records = match state.store.blocking(move |s| s.collect_matching(&filter)).await {
         Ok(v) => v,
         Err(err) => {
             warn!("web: GET /peers store error: {err}");
@@ -65,9 +70,16 @@ pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuer
     if records.len() > MAX_LIST_RESPONSE {
         records.truncate(MAX_LIST_RESPONSE);
     }
-    let expose = expose_ip(&headers, state.config.api_key.as_deref());
     let dtos: Vec<PeerDto> = records.iter().map(|r| PeerDto::from_record(r, expose)).collect();
-    Json(dtos).into_response()
+    let body = match serde_json::to_vec(&dtos) {
+        Ok(v) => axum::body::Bytes::from(v),
+        Err(err) => {
+            warn!("web: GET /peers serialize error: {err}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "serialize error").into_response();
+        }
+    };
+    state.peers_cache.put(cache_key, body.clone());
+    ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
 pub(crate) async fn get(
@@ -85,7 +97,7 @@ pub(crate) async fn get(
         port: addr.port(),
     };
     let filter = list_filter(&state.config, q.all);
-    match state.store.get(&net) {
+    match state.store.blocking(move |s| s.get(&net)).await {
         Ok(Some(rec)) if filter.matches(&rec) => {
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
             Json(PeerDto::from_record(&rec, expose)).into_response()

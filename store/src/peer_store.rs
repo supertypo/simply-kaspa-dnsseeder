@@ -43,6 +43,19 @@ pub struct PeerStore {
 }
 
 impl PeerStore {
+    /// Run a synchronous DB operation on tokio's blocking pool so it doesn't stall an async worker.
+    ///
+    /// # Panics
+    /// Panics if the underlying `spawn_blocking` join fails (i.e. the closure panics).
+    pub async fn blocking<F, T>(&self, f: F) -> T
+    where
+        F: FnOnce(&PeerStore) -> T + Send + 'static,
+        T: Send + 'static,
+    {
+        let store = self.clone();
+        tokio::task::spawn_blocking(move || f(&store)).await.expect("PeerStore::blocking task panicked")
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         if let Some(parent) = path.as_ref().parent()
             && !parent.as_os_str().is_empty()

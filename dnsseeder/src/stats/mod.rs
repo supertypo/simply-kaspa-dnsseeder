@@ -1,5 +1,3 @@
-//! Periodic stats dump.
-//!
 //! Periodic stats dump: aggregates subsystem counters, a one-pass
 //! [`PeerStore`] summary, and process metadata. Counters persist to the store
 //! after every dump so totals survive restarts (worst case: last interval's
@@ -96,12 +94,20 @@ pub async fn stats_loop(metrics: Arc<Metrics>, store: PeerStore, interval: Durat
         tokio::select! {
             _ = shutdown.recv() => {
                 debug!("stats: shutdown signal received");
-                metrics.dump(&store);
+                dump_blocking(&metrics, &store).await;
                 return;
             }
             _ = ticker.tick() => {
-                metrics.dump(&store);
+                dump_blocking(&metrics, &store).await;
             }
         }
+    }
+}
+
+async fn dump_blocking(metrics: &Arc<Metrics>, store: &PeerStore) {
+    let metrics = metrics.clone();
+    let store = store.clone();
+    if let Err(err) = tokio::task::spawn_blocking(move || metrics.dump(&store)).await {
+        warn!("stats: dump task panicked: {err}");
     }
 }

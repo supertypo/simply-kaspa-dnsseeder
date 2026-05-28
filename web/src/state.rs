@@ -8,6 +8,7 @@ use tokio::sync::RwLock;
 use crate::config::WebConfig;
 use crate::metrics::WebMetrics;
 use crate::metrics_source::{MetricsSource, NullMetricsSource};
+use crate::peers_cache::PeersCache;
 use crate::prober::Prober;
 use simply_kaspa_dnsseeder_common::RateLimiter;
 
@@ -23,6 +24,7 @@ pub struct AppState {
     pub metrics_source: Arc<dyn MetricsSource>,
     pub system: Arc<RwLock<System>>,
     pub started: Instant,
+    pub peers_cache: Arc<PeersCache>,
 }
 
 impl AppState {
@@ -54,6 +56,7 @@ impl AppState {
             metrics_source,
             system: Arc::new(RwLock::new(System::new())),
             started: Instant::now(),
+            peers_cache: Arc::new(PeersCache::new(std::time::Duration::from_secs(5))),
         }
     }
 }

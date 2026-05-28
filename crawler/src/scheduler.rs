@@ -15,6 +15,7 @@ use kaspa_consensus_core::network::NetworkId;
 use log::{debug, info, warn};
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 use tokio::sync::{Semaphore, broadcast};
+use tokio_util::sync::CancellationToken;
 
 use crate::error::Error;
 use crate::metrics::CrawlerMetrics;
@@ -33,6 +34,8 @@ const PRUNE_INTERVAL: Duration = Duration::from_secs(60);
 /// Per-host timeout for `--seeder` lookups. Mirrors the built-in DNS-seeder
 /// timeout so a single dead host can't stall bootstrap indefinitely.
 const SEEDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Time an in-flight probe gets to wind down cleanly after shutdown fires.
+const SHUTDOWN_PROBE_GRACE: Duration = Duration::from_secs(3);
 
 /// Static configuration for the scheduler.
 #[derive(Debug, Clone)]
@@ -74,6 +77,7 @@ pub struct Scheduler {
     in_flight: Arc<DashSet<SocketAddr>>,
     semaphore: Arc<Semaphore>,
     metrics: Arc<CrawlerMetrics>,
+    cancel: CancellationToken,
 }
 
 /// Bundle of `Arc`s and clones a single probe task needs. Lets the dispatch
@@ -84,6 +88,7 @@ struct ProbeTaskCtx {
     in_flight: Arc<DashSet<SocketAddr>>,
     semaphore: Arc<Semaphore>,
     metrics: Arc<CrawlerMetrics>,
+    cancel: CancellationToken,
 }
 
 impl ProbeTaskCtx {
@@ -94,6 +99,7 @@ impl ProbeTaskCtx {
             in_flight: s.in_flight.clone(),
             semaphore: s.semaphore.clone(),
             metrics: s.metrics.clone(),
+            cancel: s.cancel.clone(),
         }
     }
 }
@@ -116,6 +122,7 @@ impl Scheduler {
             in_flight: Arc::new(DashSet::new()),
             semaphore,
             metrics,
+            cancel: CancellationToken::new(),
         }
     }
 
@@ -138,17 +145,18 @@ impl Scheduler {
             tokio::select! {
                 _ = shutdown.recv() => {
                     info!("crawler: shutdown signal received");
+                    self.cancel.cancel();
                     break;
                 }
                 _ = probe_ticker.tick() => {
-                    if let Err(err) = self.enqueue_probes() {
+                    if let Err(err) = self.enqueue_probes().await {
                         warn!("crawler: probe enqueue failed: {err}");
                     }
                 }
                 _ = prune_ticker.tick() => {
                     let cutoff = now_ms().saturating_sub(self.config.dead_after_ms());
                     debug!("crawler: prune tick (cutoff={cutoff}, dead_after={:?})", self.config.dead_after);
-                    match self.store.prune_dead(cutoff) {
+                    match self.store.blocking(move |s| s.prune_dead(cutoff)).await {
                         Ok(n) if n > 0 => info!("crawler: pruned {n} dead peer(s)"),
                         Ok(_) => debug!("crawler: prune tick removed 0 peers"),
                         Err(err) => warn!("crawler: prune failed: {err}"),
@@ -176,15 +184,12 @@ impl Scheduler {
         let now = now_ms();
         let mut inserted = 0usize;
         for addr in bootstrap_addrs {
-            let net = NetAddress {
-                ip: canonicalize_ip(addr.ip()),
-                port: addr.port(),
-            };
+            let net = net_from(addr);
             if !is_acceptable_address(&net, default_port, self.config.strict_port) {
                 debug!("crawler: rejected bootstrap address {addr}");
                 continue;
             }
-            match self.store.insert_stub_if_missing(&net, now) {
+            match self.store.blocking(move |s| s.insert_stub_if_missing(&net, now)).await {
                 Ok(true) => inserted += 1,
                 Ok(false) => {}
                 Err(err) => warn!("crawler: failed to insert bootstrap stub for {addr}: {err}"),
@@ -213,7 +218,7 @@ impl Scheduler {
     /// dispatch probes through the semaphore. Skips dispatch entirely when
     /// the in-flight backlog has reached `threads * MAX_IN_FLIGHT_PER_THREAD`
     /// so slow probes can drain.
-    fn enqueue_probes(&self) -> Result<(), Error> {
+    async fn enqueue_probes(&self) -> Result<(), Error> {
         let threads = self.config.threads.max(1);
         let in_flight_cap = threads.saturating_mul(MAX_IN_FLIGHT_PER_THREAD);
         let current_in_flight = self.in_flight.len();
@@ -236,7 +241,8 @@ impl Scheduler {
         let fetch_target = batch_max.saturating_mul(2).max(batch_max);
         let candidates = self
             .store
-            .due_for_probe(now, stale_good_ms, stale_bad_ms, dead_cutoff, fetch_target)?;
+            .blocking(move |s| s.due_for_probe(now, stale_good_ms, stale_bad_ms, dead_cutoff, fetch_target))
+            .await?;
         let scanned = candidates.len();
         let mut selected: Vec<NetAddress> = Vec::with_capacity(batch_max);
         for rec in candidates {
@@ -266,49 +272,11 @@ impl Scheduler {
             if !self.in_flight.insert(addr) {
                 continue;
             }
-            if let Err(err) = self.store.record_attempt(&net, now) {
+            if let Err(err) = self.store.blocking(move |s| s.record_attempt(&net, now)).await {
                 warn!("crawler: failed to record attempt for {addr}: {err}");
             }
             let ctx = ProbeTaskCtx::snapshot(self);
-            // Acquire the permit inside the task so the dispatch loop stays responsive to shutdown.
-            tokio::spawn(async move {
-                // Drop guard ensures `in_flight` is freed and the gauge is decremented
-                // even if `probe_one` panics — without this, a panic would leak the slot
-                // and starve the back-pressure cap forever.
-                struct InFlightGuard {
-                    addr: SocketAddr,
-                    in_flight: Arc<DashSet<SocketAddr>>,
-                    metrics: Arc<CrawlerMetrics>,
-                    armed: bool,
-                }
-                impl Drop for InFlightGuard {
-                    fn drop(&mut self) {
-                        if self.armed {
-                            self.metrics.in_flight_dec();
-                        }
-                        self.in_flight.remove(&self.addr);
-                    }
-                }
-                let ProbeTaskCtx {
-                    probe,
-                    store,
-                    in_flight,
-                    semaphore,
-                    metrics,
-                } = ctx;
-                let mut guard = InFlightGuard {
-                    addr,
-                    in_flight,
-                    metrics: metrics.clone(),
-                    armed: false,
-                };
-                let Ok(_permit) = semaphore.acquire_owned().await else {
-                    return;
-                };
-                metrics.in_flight_inc();
-                guard.armed = true;
-                Self::probe_one(probe.as_ref(), &store, addr, default_port, strict_port, Some(&metrics)).await;
-            });
+            tokio::spawn(run_probe_task(ctx, addr, default_port, strict_port));
         }
         debug!(
             "crawler: probe tick (index_scanned={scanned}, dispatched={count}, in_flight={})",
@@ -336,26 +304,32 @@ impl Scheduler {
                     "crawler: probe {addr} succeeded (protocol={}, ua={:?})",
                     result.version.protocol_version, result.version.user_agent
                 );
-                if let Err(err) = apply_success(store, addr, &result) {
+                if let Err(err) = apply_success(store, addr, &result).await {
                     warn!("crawler: failed to persist successful probe of {addr}: {err}");
                 }
                 let discovered = result.addresses.len();
-                let mut new_stubs = 0usize;
                 let now = now_ms();
-                for (ip_addr, port) in &result.addresses {
-                    let port = if *port == 0 { default_port } else { *port };
-                    let ip: std::net::IpAddr = (*ip_addr).into();
-                    let canonical = canonicalize_ip(ip);
-                    let net = NetAddress { ip: canonical, port };
-                    if !is_acceptable_address(&net, default_port, strict_port) {
-                        continue;
-                    }
-                    match store.insert_stub_if_missing(&net, now) {
-                        Ok(true) => new_stubs += 1,
-                        Ok(false) => {}
-                        Err(err) => warn!("crawler: failed to insert stub for {canonical}:{port}: {err}"),
-                    }
-                }
+                let addresses = result.addresses.clone();
+                let new_stubs = store
+                    .blocking(move |s| {
+                        let mut inserted = 0usize;
+                        for (ip_addr, port) in &addresses {
+                            let port = if *port == 0 { default_port } else { *port };
+                            let ip: std::net::IpAddr = (*ip_addr).into();
+                            let canonical = canonicalize_ip(ip);
+                            let net = NetAddress { ip: canonical, port };
+                            if !is_acceptable_address(&net, default_port, strict_port) {
+                                continue;
+                            }
+                            match s.insert_stub_if_missing(&net, now) {
+                                Ok(true) => inserted += 1,
+                                Ok(false) => {}
+                                Err(err) => warn!("crawler: failed to insert stub for {canonical}:{port}: {err}"),
+                            }
+                        }
+                        inserted
+                    })
+                    .await;
                 if discovered > 0 {
                     debug!("crawler: {addr} advertised {discovered} address(es), {new_stubs} new");
                 }
@@ -371,27 +345,63 @@ impl Scheduler {
     }
 }
 
-fn apply_success(
+async fn run_probe_task(ctx: ProbeTaskCtx, addr: SocketAddr, default_port: u16, strict_port: bool) {
+    // Drop guard frees the in_flight slot and decrements the gauge even on panic.
+    struct InFlightGuard {
+        addr: SocketAddr,
+        in_flight: Arc<DashSet<SocketAddr>>,
+        metrics: Arc<CrawlerMetrics>,
+        armed: bool,
+    }
+    impl Drop for InFlightGuard {
+        fn drop(&mut self) {
+            if self.armed {
+                self.metrics.in_flight_dec();
+            }
+            self.in_flight.remove(&self.addr);
+        }
+    }
+    let ProbeTaskCtx { probe, store, in_flight, semaphore, metrics, cancel } = ctx;
+    let mut guard = InFlightGuard { addr, in_flight, metrics: metrics.clone(), armed: false };
+    let Ok(_permit) = semaphore.acquire_owned().await else { return };
+    metrics.in_flight_inc();
+    guard.armed = true;
+    let mut probe_fut = std::pin::pin!(Scheduler::probe_one(probe.as_ref(), &store, addr, default_port, strict_port, Some(&metrics)));
+    tokio::select! {
+        () = &mut probe_fut => {}
+        () = cancel.cancelled() => {
+            if tokio::time::timeout(SHUTDOWN_PROBE_GRACE, probe_fut).await.is_err() {
+                debug!("crawler: probe {addr} dropped after {SHUTDOWN_PROBE_GRACE:?} shutdown grace");
+            }
+        }
+    }
+}
+
+async fn apply_success(
     store: &PeerStore,
     addr: SocketAddr,
     result: &ProbeResult,
 ) -> Result<PeerRecord, simply_kaspa_dnsseeder_store::Error> {
-    let net = NetAddress {
-        ip: canonicalize_ip(addr.ip()),
-        port: addr.port(),
-    };
-    let existing = store.get(&net)?;
-    let record = peer_record_from_version(addr, &result.version, now_ms(), existing.as_ref());
-    store.upsert(&record)?;
-    Ok(record)
+    let net = net_from(addr);
+    let version = result.version.clone();
+    store
+        .blocking(move |s| {
+            let existing = s.get(&net)?;
+            let record = peer_record_from_version(addr, &version, now_ms(), existing.as_ref());
+            s.upsert(&record)?;
+            Ok(record)
+        })
+        .await
 }
 
-fn bump_attempt(store: &PeerStore, addr: SocketAddr) -> Result<(), simply_kaspa_dnsseeder_store::Error> {
-    let net = NetAddress {
-        ip: canonicalize_ip(addr.ip()),
-        port: addr.port(),
-    };
-    store.record_attempt(&net, now_ms()).map(|_| ())
+async fn bump_attempt(store: &PeerStore, addr: SocketAddr) -> Result<(), simply_kaspa_dnsseeder_store::Error> {
+    let net = net_from(addr);
+    let now = now_ms();
+    store.blocking(move |s| s.record_attempt(&net, now).map(|_| ())).await
+}
+
+fn net_from(addr: SocketAddr) -> NetAddress {
+    NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() }
 }
 
 impl Scheduler {
@@ -405,9 +415,9 @@ impl Scheduler {
         addr: SocketAddr,
     ) -> Result<PeerRecord, crate::error::ProbeError> {
         match probe.probe(addr).await {
-            Ok(result) => apply_success(store, addr, &result).map_err(|e| crate::error::ProbeError::Connection(e.to_string())),
+            Ok(result) => apply_success(store, addr, &result).await.map_err(|e| crate::error::ProbeError::Connection(e.to_string())),
             Err(err) => {
-                let _ = bump_attempt(store, addr);
+                let _ = bump_attempt(store, addr).await;
                 Err(err)
             }
         }
