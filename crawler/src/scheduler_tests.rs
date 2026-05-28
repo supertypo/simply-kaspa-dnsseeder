@@ -1,7 +1,11 @@
-mod is_routable {
+mod is_acceptable_address {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-    use crate::scheduler::is_routable;
+    use simply_kaspa_dnsseeder_store::NetAddress;
+
+    use crate::model::is_acceptable_address;
+
+    const DEFAULT_PORT: u16 = 16111;
 
     fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
         IpAddr::V4(Ipv4Addr::new(a, b, c, d))
@@ -9,63 +13,96 @@ mod is_routable {
     fn v6(s: &str) -> IpAddr {
         IpAddr::V6(s.parse::<Ipv6Addr>().unwrap())
     }
+    fn net(ip: IpAddr, port: u16) -> NetAddress {
+        NetAddress { ip, port }
+    }
 
     #[test]
     fn accepts_public_v4() {
-        assert!(is_routable(v4(8, 8, 8, 8)));
-        assert!(is_routable(v4(1, 1, 1, 1)));
-    }
-
-    #[test]
-    fn rejects_unspecified() {
-        assert!(!is_routable(v4(0, 0, 0, 0)));
-        assert!(!is_routable(v6("::")));
-    }
-
-    #[test]
-    fn rejects_loopback() {
-        assert!(!is_routable(v4(127, 0, 0, 1)));
-        assert!(!is_routable(v6("::1")));
-    }
-
-    #[test]
-    fn rejects_v4_private_ranges() {
-        assert!(!is_routable(v4(10, 0, 0, 1)));
-        assert!(!is_routable(v4(192, 168, 1, 1)));
-        assert!(!is_routable(v4(172, 16, 0, 1)));
-        assert!(!is_routable(v4(172, 31, 255, 254)));
-    }
-
-    #[test]
-    fn rejects_v4_link_local_and_broadcast() {
-        assert!(!is_routable(v4(169, 254, 1, 1)));
-        assert!(!is_routable(v4(255, 255, 255, 255)));
-    }
-
-    #[test]
-    fn rejects_v4_documentation_ranges() {
-        assert!(!is_routable(v4(192, 0, 2, 1)));
-        assert!(!is_routable(v4(198, 51, 100, 1)));
-        assert!(!is_routable(v4(203, 0, 113, 1)));
-    }
-
-    #[test]
-    fn rejects_multicast() {
-        assert!(!is_routable(v4(224, 0, 0, 1)));
-        assert!(!is_routable(v6("ff02::1")));
-    }
-
-    #[test]
-    fn rejects_v6_unique_local_and_link_local() {
-        assert!(!is_routable(v6("fc00::1"))); // fc00::/7
-        assert!(!is_routable(v6("fd12:3456:789a::1"))); // fc00::/7
-        assert!(!is_routable(v6("fe80::1"))); // fe80::/10
+        assert!(is_acceptable_address(&net(v4(8, 8, 8, 8), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(is_acceptable_address(&net(v4(1, 1, 1, 1), DEFAULT_PORT), DEFAULT_PORT, false));
     }
 
     #[test]
     fn accepts_public_v6() {
-        assert!(is_routable(v6("2001:4860:4860::8888")));
-        assert!(is_routable(v6("2606:4700:4700::1111")));
+        assert!(is_acceptable_address(&net(v6("2001:4860:4860::8888"), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(is_acceptable_address(&net(v6("2606:4700:4700::1111"), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_port_zero() {
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 0), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_ephemeral_ports_when_not_strict() {
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 32768), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 55000), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 65535), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn accepts_non_default_low_ports_when_not_strict() {
+        assert!(is_acceptable_address(&net(v4(8, 8, 8, 8), 16110), DEFAULT_PORT, false));
+        assert!(is_acceptable_address(&net(v4(8, 8, 8, 8), 1234), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn strict_port_rejects_non_default() {
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 16110), DEFAULT_PORT, true));
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 1234), DEFAULT_PORT, true));
+        assert!(is_acceptable_address(&net(v4(8, 8, 8, 8), DEFAULT_PORT), DEFAULT_PORT, true));
+    }
+
+    #[test]
+    fn rejects_unspecified() {
+        assert!(!is_acceptable_address(&net(v4(0, 0, 0, 0), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v6("::"), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_loopback() {
+        assert!(!is_acceptable_address(&net(v4(127, 0, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v6("::1"), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_v4_private_ranges() {
+        assert!(!is_acceptable_address(&net(v4(10, 0, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(192, 168, 1, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(172, 16, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(172, 31, 255, 254), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_v4_cgnat() {
+        assert!(!is_acceptable_address(&net(v4(100, 64, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_v4_link_local_and_broadcast() {
+        assert!(!is_acceptable_address(&net(v4(169, 254, 1, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(255, 255, 255, 255), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_v4_documentation_ranges() {
+        assert!(!is_acceptable_address(&net(v4(192, 0, 2, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(198, 51, 100, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(203, 0, 113, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_v6_unique_local_and_link_local() {
+        assert!(!is_acceptable_address(&net(v6("fc00::1"), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v6("fd12:3456:789a::1"), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v6("fe80::1"), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_multicast() {
+        assert!(!is_acceptable_address(&net(v4(224, 0, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v6("ff02::1"), DEFAULT_PORT), DEFAULT_PORT, false));
     }
 }
 
@@ -149,7 +186,7 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
 
         let enqueued = drain(&mut rx);
         assert_eq!(enqueued.len(), 2);
@@ -166,7 +203,7 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
 
         let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 4, 4)), DEFAULT_PORT)]);
@@ -190,7 +227,7 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
 
         let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec!["8.8.8.8:16111".parse().unwrap()]);
@@ -211,7 +248,7 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
 
         let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec!["8.8.8.8:16111".parse().unwrap()]);
@@ -230,7 +267,7 @@ mod probe_one_fanout {
         // Pretend 8.8.8.8 is already being crawled.
         in_flight.insert("8.8.8.8:16111".parse().unwrap());
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
 
         let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec!["1.1.1.1:16111".parse().unwrap()]);
@@ -251,7 +288,7 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
 
         // Only the first one made it into tx; the second was rolled back.
         let first = rx.try_recv().unwrap();
@@ -275,7 +312,7 @@ mod probe_one_fanout {
         let source: SocketAddr = "9.9.9.9:16111".parse().unwrap();
         in_flight.insert(source);
 
-        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT).await;
+        Scheduler::probe_one(&probe, &store, &tx, &in_flight, source, DEFAULT_PORT, false).await;
 
         let enqueued = drain(&mut rx);
         assert_eq!(enqueued, vec!["8.8.8.8:16111".parse::<SocketAddr>().unwrap()]);

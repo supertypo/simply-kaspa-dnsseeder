@@ -66,3 +66,29 @@ pub fn canonicalize_ip(ip: IpAddr) -> IpAddr {
 pub fn now_ms() -> i64 {
     Utc::now().timestamp_millis()
 }
+
+/// Ephemeral port floor (IANA dynamic range; Linux default `ip_local_port_range` start).
+/// Ports at or above this value are almost always client-side source ports, not listening sockets.
+pub const EPHEMERAL_PORT_FLOOR: u16 = 32_768;
+
+/// Returns true if an address is worth probing and storing. Rejects port 0,
+/// non-publicly-routable IPs (loopback, RFC1918, link-local, CGNAT, ULA, multicast, etc.),
+/// and either ephemeral ports or any port that isn't the network default when
+/// `strict_port` is set.
+#[must_use]
+pub fn is_acceptable_address(addr: &NetAddress, default_port: u16, strict_port: bool) -> bool {
+    if addr.port == 0 {
+        return false;
+    }
+    if strict_port {
+        if addr.port != default_port {
+            return false;
+        }
+    } else if addr.port >= EPHEMERAL_PORT_FLOOR {
+        return false;
+    }
+    if addr.ip.is_multicast() {
+        return false;
+    }
+    IpAddress::from(addr.ip).is_publicly_routable()
+}

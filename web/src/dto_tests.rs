@@ -5,6 +5,8 @@ use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord};
 
 use crate::dto::PeerDto;
 
+const DEFAULT_PORT: u16 = 16111;
+
 fn rec_with_ua(ua: &str) -> PeerRecord {
     PeerRecord {
         id: [0x11; 16],
@@ -23,53 +25,65 @@ fn rec_with_ua(ua: &str) -> PeerRecord {
 #[test]
 fn public_view_exposes_only_anonymous_fields() {
     let rec = rec_with_ua("/kaspad:1.1.0/");
-    let dto = PeerDto::from_record(&rec, false);
+    let dto = PeerDto::from_record(&rec, false, DEFAULT_PORT);
     let json: Value = serde_json::to_value(&dto).unwrap();
     let obj = json.as_object().expect("object");
 
     let keys: std::collections::BTreeSet<&str> = obj.keys().map(String::as_str).collect();
     let expected: std::collections::BTreeSet<&str> =
-        ["protocol_version", "user_agent", "kaspad_version", "port", "last_seen_ms", "last_seen"].into_iter().collect();
+        ["protocolVersion", "userAgent", "kaspadVersion", "port", "defaultPort", "lastSeenMs", "lastSeen"].into_iter().collect();
     assert_eq!(keys, expected);
     assert_eq!(obj["port"], 16111);
-    assert_eq!(obj["protocol_version"], 7);
+    assert_eq!(obj["protocolVersion"], 7);
+    assert_eq!(obj["defaultPort"], true);
 }
 
 #[test]
 fn full_view_exposes_all_fields() {
     let rec = rec_with_ua("/kaspad:1.1.0/");
-    let dto = PeerDto::from_record(&rec, true);
+    let dto = PeerDto::from_record(&rec, true, DEFAULT_PORT);
     let json: Value = serde_json::to_value(&dto).unwrap();
     let obj = json.as_object().expect("object");
 
     for k in [
         "id",
-        "protocol_version",
-        "user_agent",
-        "kaspad_version",
+        "protocolVersion",
+        "userAgent",
+        "kaspadVersion",
         "ip",
         "port",
-        "first_seen_ms",
-        "last_seen_ms",
-        "last_attempt_ms",
-        "last_success_ms",
-        "first_seen",
-        "last_seen",
-        "last_attempt",
-        "last_success",
+        "defaultPort",
+        "firstSeenMs",
+        "lastSeenMs",
+        "lastAttemptMs",
+        "lastSuccessMs",
+        "firstSeen",
+        "lastSeen",
+        "lastAttempt",
+        "lastSuccess",
     ] {
         assert!(obj.contains_key(k), "missing key {k}");
     }
     assert_eq!(obj["ip"], "1.2.3.4");
     assert_eq!(obj["id"], "11111111111111111111111111111111");
+    assert_eq!(obj["defaultPort"], true);
+}
+
+#[test]
+fn default_port_is_false_when_port_differs() {
+    let mut rec = rec_with_ua("/kaspad:1.1.0/");
+    rec.address.port = 16112;
+    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true, DEFAULT_PORT)).unwrap();
+    assert_eq!(json["defaultPort"], false);
+    assert_eq!(json["port"], 16112);
 }
 
 #[test]
 fn iso_timestamps_use_seconds_precision_with_z_suffix() {
     let rec = rec_with_ua("/kaspad:1.1.0/");
-    let dto = PeerDto::from_record(&rec, true);
+    let dto = PeerDto::from_record(&rec, true, DEFAULT_PORT);
     let json: Value = serde_json::to_value(&dto).unwrap();
-    for field in ["first_seen", "last_seen", "last_attempt", "last_success"] {
+    for field in ["firstSeen", "lastSeen", "lastAttempt", "lastSuccess"] {
         let s = json[field].as_str().unwrap();
         assert!(s.ends_with('Z'), "{field} = {s} (expected trailing Z)");
         assert!(!s.contains('.'), "{field} = {s} (expected seconds precision, no fractional)");
@@ -80,13 +94,13 @@ fn iso_timestamps_use_seconds_precision_with_z_suffix() {
 #[test]
 fn kaspad_version_preserves_prerelease_suffix() {
     let rec = rec_with_ua("/kaspad:1.2.1-toc.3/");
-    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, false)).unwrap();
-    assert_eq!(json["kaspad_version"], "1.2.1-toc.3");
+    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, false, DEFAULT_PORT)).unwrap();
+    assert_eq!(json["kaspadVersion"], "1.2.1-toc.3");
 }
 
 #[test]
 fn kaspad_version_is_null_when_unparseable() {
     let rec = rec_with_ua("/something-else/");
-    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true)).unwrap();
-    assert_eq!(json["kaspad_version"], Value::Null);
+    let json: Value = serde_json::to_value(PeerDto::from_record(&rec, true, DEFAULT_PORT)).unwrap();
+    assert_eq!(json["kaspadVersion"], Value::Null);
 }

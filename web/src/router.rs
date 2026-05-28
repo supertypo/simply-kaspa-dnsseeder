@@ -13,6 +13,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use log::{debug, warn};
 use serde_json::json;
+use simply_kaspa_dnsseeder_crawler::is_acceptable_address;
 use simply_kaspa_dnsseeder_store::{Filter, NetAddress};
 
 use crate::dto::PeerDto;
@@ -63,7 +64,8 @@ async fn list_peers(State(state): State<AppState>, headers: HeaderMap) -> Respon
     };
     records.sort_by_key(|r| std::cmp::Reverse(r.last_success_ms));
     let expose = expose_ip(&headers, state.config.api_key.as_deref());
-    let dtos: Vec<PeerDto> = records.iter().map(|r| PeerDto::from_record(r, expose)).collect();
+    let default_port = state.config.network_default_port;
+    let dtos: Vec<PeerDto> = records.iter().map(|r| PeerDto::from_record(r, expose, default_port)).collect();
     Json(dtos).into_response()
 }
 
@@ -76,7 +78,7 @@ async fn get_peer(State(state): State<AppState>, Path(addr_str): Path<String>, h
     match state.store.get(&net) {
         Ok(Some(rec)) => {
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
-            Json(PeerDto::from_record(&rec, expose)).into_response()
+            Json(PeerDto::from_record(&rec, expose, state.config.network_default_port)).into_response()
         }
         Ok(None) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
         Err(err) => {
@@ -125,10 +127,16 @@ async fn submit_peer(
         Err(err) => return (StatusCode::BAD_REQUEST, format!("invalid ip:port — {err}")).into_response(),
     };
 
+    let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+    if !is_acceptable_address(&net, state.config.network_default_port, state.config.strict_port) {
+        return (StatusCode::BAD_REQUEST, "address is not publicly routable or uses a disallowed port").into_response();
+    }
+    let addr = SocketAddr::new(net.ip, net.port);
+
     match state.prober.probe(addr).await {
         Ok(rec) => {
             let expose = expose_ip(&headers, state.config.api_key.as_deref());
-            (StatusCode::OK, Json(PeerDto::from_record(&rec, expose))).into_response()
+            (StatusCode::OK, Json(PeerDto::from_record(&rec, expose, state.config.network_default_port))).into_response()
         }
         Err(err) => {
             debug!("POST /peers probe of {addr} failed: {err}");

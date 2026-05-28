@@ -49,6 +49,8 @@ fn make_state(prober: Arc<dyn Prober>, store: PeerStore, api_key: Option<String>
         allowed_origins: Vec::new(),
         post_rate_limit: 5,
         rate_limit_window: Duration::from_secs(60),
+        network_default_port: 16111,
+        strict_port: false,
     };
     AppState::new(store, prober, cfg)
 }
@@ -223,6 +225,8 @@ async fn rate_limit_blocks_repeated_posts() {
         allowed_origins: Vec::new(),
         post_rate_limit: 1,
         rate_limit_window: Duration::from_secs(60),
+        network_default_port: 16111,
+        strict_port: false,
     };
     let state = AppState::new(store, Arc::new(MockProber::default()), cfg);
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
@@ -237,4 +241,67 @@ async fn rate_limit_blocks_repeated_posts() {
 
     let second = conn.call(req()).await.unwrap();
     assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn get_peer_includes_default_port_true() {
+    let (_temp, store) = seeded_store();
+    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let app = build_router(state);
+    let res = app.oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap()).await.unwrap();
+    let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["defaultPort"], true);
+    assert_eq!(json["port"], 16111);
+}
+
+#[tokio::test]
+async fn list_peers_uses_camel_case_keys() {
+    let (_temp, store) = seeded_store();
+    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let app = build_router(state);
+    let res = app.oneshot(Request::get("/peers").body(Body::empty()).unwrap()).await.unwrap();
+    let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let entry = &json[0];
+    for key in ["protocolVersion", "userAgent", "lastSeenMs", "firstSeenMs", "defaultPort", "ip", "port"] {
+        assert!(entry.get(key).is_some(), "missing camelCase field `{key}` in {entry}");
+    }
+    assert!(entry.get("protocol_version").is_none(), "stale snake_case `protocol_version` still present");
+}
+
+#[tokio::test]
+async fn post_peers_rejects_private_ip() {
+    let temp = TempDir::new().unwrap();
+    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
+    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
+
+    let mut svc = app;
+    let mut conn = svc.call(SocketAddr::from_str("127.0.0.1:1234").unwrap()).await.unwrap();
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/peers")
+        .body(Body::from("10.0.0.1:16111"))
+        .unwrap();
+    let res = conn.call(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn post_peers_rejects_ephemeral_port() {
+    let temp = TempDir::new().unwrap();
+    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
+    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
+
+    let mut svc = app;
+    let mut conn = svc.call(SocketAddr::from_str("127.0.0.1:1234").unwrap()).await.unwrap();
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/peers")
+        .body(Body::from("1.2.3.4:55000"))
+        .unwrap();
+    let res = conn.call(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }

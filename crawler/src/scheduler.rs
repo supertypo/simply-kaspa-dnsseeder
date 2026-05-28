@@ -1,6 +1,6 @@
 //! Concurrent scheduler driving peer probes.
 
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 use tokio::sync::{Semaphore, broadcast, mpsc};
 
 use crate::error::Error;
-use crate::model::{ProbeResult, canonicalize_ip, now_ms, peer_record_from_version};
+use crate::model::{ProbeResult, canonicalize_ip, is_acceptable_address, now_ms, peer_record_from_version};
 use crate::probe::Probe;
 use crate::seeders::{Resolver, dns_seed_many};
 
@@ -24,6 +24,8 @@ pub struct SchedulerConfig {
     pub dead_after: Duration,
     /// Explicit DNS seeder hosts (`--seeder`), tried at bootstrap if non-empty.
     pub seeders: Vec<String>,
+    /// When true, only addresses on the network's default P2P port are accepted.
+    pub strict_port: bool,
 }
 
 impl SchedulerConfig {
@@ -93,9 +95,10 @@ impl Scheduler {
                     let in_flight = self.in_flight.clone();
                     let tx = self.tx.clone();
                     let default_port = self.config.network_id.default_p2p_port();
+                    let strict_port = self.config.strict_port;
                     tokio::spawn(async move {
                         let _permit = permit;
-                        Self::probe_one(probe.as_ref(), &store, &tx, &in_flight, addr, default_port).await;
+                        Self::probe_one(probe.as_ref(), &store, &tx, &in_flight, addr, default_port, strict_port).await;
                         in_flight.remove(&addr);
                     });
                 }
@@ -119,16 +122,22 @@ impl Scheduler {
             self.resolve_explicit_seeders().await
         };
 
+        let default_port = self.config.network_id.default_p2p_port();
         for addr in bootstrap_addrs {
-            if !self.in_flight.insert(addr) {
+            let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
+            if !is_acceptable_address(&net, default_port, self.config.strict_port) {
+                debug!("crawler: rejected bootstrap address {addr}");
                 continue;
             }
-            let net = NetAddress { ip: canonicalize_ip(addr.ip()), port: addr.port() };
-            if let Err(err) = self.store.record_attempt(&net, now_ms()) {
-                warn!("crawler: failed to record bootstrap attempt for {addr}: {err}");
+            let canonical_addr = SocketAddr::new(net.ip, net.port);
+            if !self.in_flight.insert(canonical_addr) {
+                continue;
             }
-            if self.tx.send(addr).await.is_err() {
-                self.in_flight.remove(&addr);
+            if let Err(err) = self.store.record_attempt(&net, now_ms()) {
+                warn!("crawler: failed to record bootstrap attempt for {canonical_addr}: {err}");
+            }
+            if self.tx.send(canonical_addr).await.is_err() {
+                self.in_flight.remove(&canonical_addr);
                 break;
             }
         }
@@ -151,9 +160,13 @@ impl Scheduler {
         let now = now_ms();
         let interval_ms = self.config.crawl_interval_ms();
         let dead_cutoff = now.saturating_sub(self.config.dead_after_ms());
+        let default_port = self.config.network_id.default_p2p_port();
         let records = self.store.iter_all()?;
         let mut count = 0;
         for rec in records {
+            if !is_acceptable_address(&rec.address, default_port, self.config.strict_port) {
+                continue;
+            }
             // Skip records that are going to be pruned anyway. This matches
             // `PeerStore::prune_dead`'s definition of "dead": stale for
             // previously-seen peers, or never-seen-and-too-old for stubs.
@@ -192,6 +205,7 @@ impl Scheduler {
         in_flight: &DashSet<SocketAddr>,
         addr: SocketAddr,
         default_port: u16,
+        strict_port: bool,
     ) {
         match probe.probe(addr).await {
             Ok(result) => {
@@ -204,14 +218,14 @@ impl Scheduler {
                     let port = if *port == 0 { default_port } else { *port };
                     let ip: std::net::IpAddr = (*ip_addr).into();
                     let canonical = canonicalize_ip(ip);
-                    if !is_routable(canonical) {
+                    let net = NetAddress { ip: canonical, port };
+                    if !is_acceptable_address(&net, default_port, strict_port) {
                         continue;
                     }
                     let new_addr = SocketAddr::new(canonical, port);
                     if !in_flight.insert(new_addr) {
                         continue;
                     }
-                    let net = NetAddress { ip: canonical, port };
                     if let Err(err) = store.record_attempt(&net, now_ms()) {
                         warn!("crawler: failed to record discovery attempt for {new_addr}: {err}");
                     }
@@ -231,20 +245,6 @@ impl Scheduler {
                     warn!("crawler: failed to bump last_attempt for {addr}: {err}");
                 }
             }
-        }
-    }
-}
-
-pub(crate) fn is_routable(ip: IpAddr) -> bool {
-    if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() {
-        return false;
-    }
-    match ip {
-        IpAddr::V4(v4) => !(v4.is_private() || v4.is_link_local() || v4.is_broadcast() || v4.is_documentation()),
-        IpAddr::V6(v6) => {
-            let seg = v6.segments()[0];
-            // fc00::/7 unique local, fe80::/10 link-local
-            !((seg & 0xfe00) == 0xfc00 || (seg & 0xffc0) == 0xfe80)
         }
     }
 }

@@ -7,7 +7,7 @@ use kaspa_consensus_core::network::NetworkId;
 pub struct DnsConfig {
     pub network_id: NetworkId,
     pub dns_listen: SocketAddr,
-    pub dns_host: String,
+    pub dns_zone: String,
     pub nameserver: String,
     pub max_records: usize,
     pub ttl_seconds: u32,
@@ -18,11 +18,11 @@ pub struct DnsConfig {
 
 impl DnsConfig {
     #[must_use]
-    pub fn new(network_id: NetworkId, dns_listen: SocketAddr, dns_host: String, nameserver: String) -> Self {
+    pub fn new(network_id: NetworkId, dns_listen: SocketAddr, dns_zone: String, nameserver: String) -> Self {
         Self {
             network_id,
             dns_listen,
-            dns_host,
+            dns_zone,
             nameserver,
             max_records: 10,
             ttl_seconds: 60,

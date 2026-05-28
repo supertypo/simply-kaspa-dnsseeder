@@ -1,6 +1,6 @@
 //! Tiny hickory-server based DNS server.
 //!
-//! The seeder is authoritative for a single apex name (`--dns-host`) and only
+//! The seeder is authoritative for a single apex name (`--dns-zone`) and only
 //! answers `A`, `AAAA`, `NS` and `SOA` queries for that exact name. Anything
 //! else gets `REFUSED`. Address records are pulled from the
 //! [`simply_kaspa_dnsseeder_store::PeerStore`] live on every request.

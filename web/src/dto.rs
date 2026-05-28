@@ -19,16 +19,19 @@ pub enum PeerDto {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PublicPeerDto {
     pub protocol_version: u32,
     pub user_agent: String,
     pub kaspad_version: Option<String>,
     pub port: u16,
+    pub default_port: bool,
     pub last_seen_ms: i64,
     pub last_seen: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FullPeerDto {
     pub id: String,
     pub protocol_version: u32,
@@ -36,6 +39,7 @@ pub struct FullPeerDto {
     pub kaspad_version: Option<String>,
     pub ip: String,
     pub port: u16,
+    pub default_port: bool,
     pub first_seen_ms: i64,
     pub last_seen_ms: i64,
     pub last_attempt_ms: i64,
@@ -48,30 +52,33 @@ pub struct FullPeerDto {
 
 impl PeerDto {
     #[must_use]
-    pub fn from_record(rec: &PeerRecord, expose_full: bool) -> Self {
+    pub fn from_record(rec: &PeerRecord, expose_full: bool, network_default_port: u16) -> Self {
         if expose_full {
-            Self::Full(FullPeerDto::from(rec))
+            Self::Full(FullPeerDto::from_record(rec, network_default_port))
         } else {
-            Self::Public(PublicPeerDto::from(rec))
+            Self::Public(PublicPeerDto::from_record(rec, network_default_port))
         }
     }
 }
 
-impl From<&PeerRecord> for PublicPeerDto {
-    fn from(rec: &PeerRecord) -> Self {
+impl PublicPeerDto {
+    #[must_use]
+    pub fn from_record(rec: &PeerRecord, network_default_port: u16) -> Self {
         Self {
             protocol_version: rec.protocol_version,
             user_agent: rec.user_agent.clone(),
             kaspad_version: PeerRecord::parse_kaspad_version(&rec.user_agent).map(|v| v.to_string()),
             port: rec.address.port,
+            default_port: rec.address.port == network_default_port,
             last_seen_ms: rec.last_seen_ms,
             last_seen: format_iso(rec.last_seen_ms),
         }
     }
 }
 
-impl From<&PeerRecord> for FullPeerDto {
-    fn from(rec: &PeerRecord) -> Self {
+impl FullPeerDto {
+    #[must_use]
+    pub fn from_record(rec: &PeerRecord, network_default_port: u16) -> Self {
         Self {
             id: hex::encode(rec.id),
             protocol_version: rec.protocol_version,
@@ -79,6 +86,7 @@ impl From<&PeerRecord> for FullPeerDto {
             kaspad_version: PeerRecord::parse_kaspad_version(&rec.user_agent).map(|v| v.to_string()),
             ip: rec.address.ip.to_string(),
             port: rec.address.port,
+            default_port: rec.address.port == network_default_port,
             first_seen_ms: rec.first_seen_ms,
             last_seen_ms: rec.last_seen_ms,
             last_attempt_ms: rec.last_attempt_ms,

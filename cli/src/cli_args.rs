@@ -30,6 +30,11 @@ pub struct CliArgs {
     #[clap(long, default_value = "7d", value_parser = humantime::parse_duration)]
     pub dead_after: Duration,
 
+    /// Only accept addresses whose port matches the network's default P2P port. When false
+    /// (the default), any non-ephemeral routable port (< 32768) is accepted for storage.
+    #[clap(long)]
+    pub strict_port: bool,
+
     /// Minimum protocol version accepted in DNS responses (optional).
     #[clap(long)]
     pub min_protocol_version: Option<u32>,
@@ -42,9 +47,9 @@ pub struct CliArgs {
     #[clap(long, default_value = "data")]
     pub datadir: String,
 
-    /// Authoritative DNS host (FQDN). DNS server enabled iff this and `--dns-nameserver` are set.
+    /// Authoritative DNS zone (FQDN apex) the seeder answers for. DNS server enabled iff this and `--dns-nameserver` are set.
     #[clap(long)]
-    pub dns_host: Option<String>,
+    pub dns_zone: Option<String>,
 
     /// Nameserver FQDN returned for NS queries.
     #[clap(long)]
@@ -99,7 +104,7 @@ impl CliArgs {
     /// Returns true iff the DNS server should be started.
     #[must_use]
     pub fn dns_enabled(&self) -> bool {
-        self.dns_host.is_some() && self.dns_nameserver.is_some()
+        self.dns_zone.is_some() && self.dns_nameserver.is_some()
     }
 }
 

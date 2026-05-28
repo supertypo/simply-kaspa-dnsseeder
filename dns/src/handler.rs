@@ -35,7 +35,7 @@ pub struct SeederHandler {
 
 impl SeederHandler {
     pub fn new(config: DnsConfig, store: PeerStore) -> Result<Self, hickory_proto::ProtoError> {
-        let apex = fqdn(&config.dns_host)?;
+        let apex = fqdn(&config.dns_zone)?;
         let nameserver = fqdn(&config.nameserver)?;
         let hostmaster = Name::from_str("hostmaster.")?.append_domain(&apex)?;
         let p2p_port = config.network_id.default_p2p_port();

@@ -55,6 +55,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         crawl_interval: cli.crawl_interval,
         dead_after: cli.dead_after,
         seeders: cli.seeder.iter().cloned().collect(),
+        strict_port: cli.strict_port,
     };
     let resolver = Arc::new(TokioResolver);
     let scheduler = Scheduler::new(scheduler_cfg, store.clone(), probe.clone(), resolver);
@@ -72,7 +73,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         let dns_cfg = DnsConfig::new(
             network_id,
             dns_listen,
-            cli.dns_host.clone().expect("dns_enabled implies dns_host"),
+            cli.dns_zone.clone().expect("dns_enabled implies dns_zone"),
             cli.dns_nameserver.clone().expect("dns_enabled implies dns_nameserver"),
         );
         let dns_store = store.clone();
@@ -84,7 +85,7 @@ async fn run(cli: CliArgs) -> Result<()> {
             }
         }))
     } else {
-        info!("dns: disabled (set --dns-host and --dns-nameserver to enable)");
+        info!("dns: disabled (set --dns-zone and --dns-nameserver to enable)");
         None
     };
 
@@ -96,6 +97,8 @@ async fn run(cli: CliArgs) -> Result<()> {
         allowed_origins: cli.allowed_origins.clone(),
         post_rate_limit: cli.post_rate_limit,
         rate_limit_window: cli.rate_limit_window,
+        network_default_port: network_id.default_p2p_port(),
+        strict_port: cli.strict_port,
     };
     let prober = Arc::new(SchedulerProber::new(probe.clone(), store.clone()));
     let state = AppState::new(store.clone(), prober, web_cfg);

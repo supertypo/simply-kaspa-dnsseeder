@@ -28,16 +28,23 @@ fn defaults_match_spec() {
     assert!(cli.api_key.is_none());
     assert!(cli.allowed_origins.is_empty());
     assert!(!cli.dns_enabled());
+    assert!(!cli.strict_port);
+}
+
+#[test]
+fn strict_port_flag_toggles() {
+    let cli = parse(&["--network-id", "kaspa-mainnet", "--strict-port"]);
+    assert!(cli.strict_port);
 }
 
 #[test]
 fn dns_enabled_only_when_both_set() {
-    let cli = parse(&["--network-id", "kaspa-mainnet", "--dns-host", "seed.test"]);
+    let cli = parse(&["--network-id", "kaspa-mainnet", "--dns-zone", "seed.test"]);
     assert!(!cli.dns_enabled());
     let cli = parse(&[
         "--network-id",
         "kaspa-mainnet",
-        "--dns-host",
+        "--dns-zone",
         "seed.test",
         "--dns-nameserver",
         "ns.test",

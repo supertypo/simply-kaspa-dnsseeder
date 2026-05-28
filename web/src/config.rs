@@ -16,4 +16,9 @@ pub struct WebConfig {
     /// Maximum `POST /peers` requests per `rate_limit_window` per client IP.
     pub post_rate_limit: u32,
     pub rate_limit_window: Duration,
+    /// The network's default P2P port, used to compute the `defaultPort` flag
+    /// on outgoing peer DTOs and to validate `POST /peers` when `strict_port` is set.
+    pub network_default_port: u16,
+    /// When true, `POST /peers` rejects any address whose port isn't `network_default_port`.
+    pub strict_port: bool,
 }
