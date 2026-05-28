@@ -265,7 +265,7 @@ impl Scheduler {
     }
 }
 
-fn is_routable(ip: IpAddr) -> bool {
+pub(crate) fn is_routable(ip: IpAddr) -> bool {
     if ip.is_unspecified() || ip.is_loopback() || ip.is_multicast() {
         return false;
     }

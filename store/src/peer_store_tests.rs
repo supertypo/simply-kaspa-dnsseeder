@@ -110,3 +110,38 @@ fn reopens_persisting_records() {
     assert_eq!(s2.len().unwrap(), 1);
     assert!(s2.get(&[7; 16]).unwrap().is_some());
 }
+
+#[test]
+fn open_purges_undecodable_records() {
+    use redb::Database;
+    const PEERS: redb::TableDefinition<&[u8], &[u8]> = redb::TableDefinition::new("peers");
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("p.redb");
+
+    // Seed: one valid record + two garbage rows representing an obsolete schema.
+    {
+        let s = PeerStore::open(&path).unwrap();
+        s.upsert(&make_rec(1, Ipv4Addr::new(1, 1, 1, 1), 16111, 100)).unwrap();
+    }
+    {
+        let db = Database::create(&path).unwrap();
+        let txn = db.begin_write().unwrap();
+        {
+            let mut t = txn.open_table(PEERS).unwrap();
+            let garbage_a: [u8; 16] = [0xAA; 16];
+            let garbage_b: [u8; 16] = [0xBB; 16];
+            // Bytes that will not decode as `PeerRecord` under any current layout.
+            t.insert(garbage_a.as_slice(), [0x6B, 0x6B, 0x6B, 0x6B, 0x6B].as_slice()).unwrap();
+            t.insert(garbage_b.as_slice(), [0xFF; 32].as_slice()).unwrap();
+        }
+        txn.commit().unwrap();
+    }
+
+    // Reopening should silently drop the two undecodable rows.
+    let s = PeerStore::open(&path).unwrap();
+    assert_eq!(s.len().unwrap(), 1);
+    assert!(s.get(&[1; 16]).unwrap().is_some());
+    assert!(s.get(&[0xAA; 16]).unwrap().is_none());
+    assert!(s.get(&[0xBB; 16]).unwrap().is_none());
+}

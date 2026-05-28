@@ -22,6 +22,8 @@ pub mod server;
 pub mod state;
 
 #[cfg(test)]
+mod dto_tests;
+#[cfg(test)]
 mod router_tests;
 
 pub use config::WebConfig;

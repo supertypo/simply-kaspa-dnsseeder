@@ -23,13 +23,45 @@ impl PeerStore {
             }
         }
         let db = Database::create(path.as_ref())?;
-        // Ensure the table exists.
         let txn = db.begin_write()?;
         {
             let _ = txn.open_table(PEERS)?;
         }
         txn.commit()?;
-        Ok(Self { db: Arc::new(db) })
+        let store = Self { db: Arc::new(db) };
+        let purged = store.purge_undecodable()?;
+        if purged > 0 {
+            warn!("store: purged {purged} record(s) incompatible with the current schema");
+        }
+        Ok(store)
+    }
+
+    /// Drop every row that fails to decode against the current `PeerRecord`
+    /// schema. Returns the number of rows removed.
+    fn purge_undecodable(&self) -> Result<usize, Error> {
+        let mut to_delete: Vec<Vec<u8>> = Vec::new();
+        {
+            let txn = self.db.begin_read()?;
+            let t = txn.open_table(PEERS)?;
+            for entry in t.iter()? {
+                let (k, v) = entry?;
+                if decode(v.value()).is_err() {
+                    to_delete.push(k.value().to_vec());
+                }
+            }
+        }
+        if to_delete.is_empty() {
+            return Ok(0);
+        }
+        let txn = self.db.begin_write()?;
+        {
+            let mut t = txn.open_table(PEERS)?;
+            for k in &to_delete {
+                t.remove(k.as_slice())?;
+            }
+        }
+        txn.commit()?;
+        Ok(to_delete.len())
     }
 
     /// Insert or update a record, overwriting any previous record with the same id.
