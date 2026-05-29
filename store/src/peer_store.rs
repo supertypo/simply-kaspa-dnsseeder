@@ -61,12 +61,24 @@ impl PeerStore {
     }
 
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
-        if let Some(parent) = path.as_ref().parent()
+        let path = path.as_ref();
+        if let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
         {
             std::fs::create_dir_all(parent)?;
         }
-        let db = Database::create(path.as_ref())?;
+        let db = match Database::create(path) {
+            Ok(db) => db,
+            Err(err) if is_incompatible_db(&err) => {
+                warn!(
+                    "store: existing database at {} is incompatible ({err}); wiping and recreating",
+                    path.display()
+                );
+                std::fs::remove_file(path)?;
+                Database::create(path)?
+            }
+            Err(err) => return Err(err.into()),
+        };
         let txn = db.begin_write()?;
         {
             let _ = txn.open_table(PEERS)?;
@@ -466,4 +478,8 @@ pub fn is_eligible_for_probe(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, 
     let since_attempt = now_ms.saturating_sub(rec.last_attempt_ms);
     let threshold = if rec.last_success_ms > 0 { stale_good_ms } else { stale_bad_ms };
     since_attempt >= threshold
+}
+
+fn is_incompatible_db(err: &redb::DatabaseError) -> bool {
+    matches!(err, redb::DatabaseError::UpgradeRequired(_) | redb::DatabaseError::RepairAborted)
 }
