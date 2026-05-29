@@ -17,6 +17,7 @@ use clap::Parser;
 use kaspa_consensus_core::network::NetworkId;
 use log::{error, info, warn};
 use simply_kaspa_dnsseeder_cli::CliArgs;
+use simply_kaspa_dnsseeder_common::generate_api_key;
 use simply_kaspa_dnsseeder_crawler::{KaspadProbe, ProbeInitializerConfig, Scheduler, SchedulerConfig, TokioResolver};
 use simply_kaspa_dnsseeder_dns::{DnsConfig, SeederHandler, build_serving_cache};
 use simply_kaspa_dnsseeder_store::PeerStore;
@@ -117,9 +118,15 @@ async fn run(cli: CliArgs) -> Result<()> {
         .http_listen
         .parse()
         .with_context(|| format!("invalid --http-listen `{}`", cli.http.http_listen))?;
+    let api_key = cli.http.api_key.clone().unwrap_or_else(|| {
+        let key = generate_api_key();
+        info!("web: --api-key not set; generated ephemeral key (rotates each restart)");
+        info!("web: X-API-KEY: {key}");
+        key
+    });
     let web_cfg = WebConfig {
         listen: http_listen,
-        api_key: cli.http.api_key.clone(),
+        api_key,
         allowed_origins: cli.http.allowed_origins.clone(),
         post_rate_limit: cli.http.post_rate_limit,
         rate_limit_window: cli.http.rate_limit_window,

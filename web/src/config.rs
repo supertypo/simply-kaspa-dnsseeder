@@ -9,10 +9,10 @@ use semver::Version;
 #[derive(Debug, Clone)]
 pub struct WebConfig {
     pub listen: SocketAddr,
-    /// When `Some(key)`, IP addresses are stripped from responses unless the
-    /// caller presents a matching `X-API-KEY` header. `POST /peers` is also
-    /// gated by this key when present.
-    pub api_key: Option<String>,
+    /// Required `X-API-KEY` header value. IP addresses are stripped from
+    /// responses unless the caller presents this header, and `POST /peers`
+    /// is gated by it.
+    pub api_key: String,
     /// Allow-list checked against the `Origin` header for `POST /peers`. An
     /// empty list permits all origins.
     pub allowed_origins: Vec<String>,

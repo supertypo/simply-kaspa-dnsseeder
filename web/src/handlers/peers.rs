@@ -53,7 +53,7 @@ pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {
 
 pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>, headers: HeaderMap) -> Response {
     state.obs.metrics.record_request();
-    let expose = expose_ip(&headers, state.config.api_key.as_deref());
+    let expose = expose_ip(&headers, &state.config.api_key);
     let cache_key = crate::peers_cache::Key { all: q.all, expose };
     if let Some(body) = state.peers_cache.get(cache_key) {
         return ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response();
@@ -99,7 +99,7 @@ pub(crate) async fn get(
     let filter = list_filter(&state.config, q.all);
     match state.runtime.store.blocking(move |s| s.get(&net)).await {
         Ok(Some(rec)) if filter.matches(&rec) => {
-            let expose = expose_ip(&headers, state.config.api_key.as_deref());
+            let expose = expose_ip(&headers, &state.config.api_key);
             Json(PeerDto::from_record(&rec, expose)).into_response()
         }
         Ok(_) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
@@ -117,12 +117,10 @@ pub(crate) async fn submit(
     body: String,
 ) -> Response {
     state.obs.metrics.record_request();
-    if let Some(expected) = state.config.api_key.as_deref() {
-        let presented = headers.get(&X_API_KEY).and_then(|v| v.to_str().ok());
-        if presented != Some(expected) {
-            state.obs.metrics.record_post_rejected_auth();
-            return (StatusCode::UNAUTHORIZED, "missing or invalid api key").into_response();
-        }
+    let presented = headers.get(&X_API_KEY).and_then(|v| v.to_str().ok());
+    if presented != Some(state.config.api_key.as_str()) {
+        state.obs.metrics.record_post_rejected_auth();
+        return (StatusCode::UNAUTHORIZED, "missing or invalid api key").into_response();
     }
 
     if !state.config.allowed_origins.is_empty() {
@@ -162,7 +160,7 @@ pub(crate) async fn submit(
         Ok(rec) => {
             state.obs.metrics.record_accepted();
             debug!("web: POST /peers accepted {addr} (probe ok)");
-            let expose = expose_ip(&headers, state.config.api_key.as_deref());
+            let expose = expose_ip(&headers, &state.config.api_key);
             (StatusCode::OK, Json(PeerDto::from_record(&rec, expose))).into_response()
         }
         Err(err) => {

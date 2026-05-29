@@ -8,13 +8,9 @@ use axum::http::{HeaderMap, HeaderName};
 pub(crate) const X_API_KEY: HeaderName = HeaderName::from_static("x-api-key");
 pub(crate) const X_FORWARDED_FOR: HeaderName = HeaderName::from_static("x-forwarded-for");
 
-/// True iff a request is allowed to see peer IPs: either no api key is
-/// configured, or the request carries the matching key.
-pub(crate) fn expose_ip(headers: &HeaderMap, api_key: Option<&str>) -> bool {
-    match api_key {
-        None => true,
-        Some(expected) => headers.get(&X_API_KEY).and_then(|v| v.to_str().ok()) == Some(expected),
-    }
+/// True iff the request carries the matching `X-API-KEY` header.
+pub(crate) fn expose_ip(headers: &HeaderMap, api_key: &str) -> bool {
+    headers.get(&X_API_KEY).and_then(|v| v.to_str().ok()) == Some(api_key)
 }
 
 /// Best-effort client IP: honours the first entry of `X-Forwarded-For` when present.

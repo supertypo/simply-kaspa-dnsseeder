@@ -9,3 +9,5 @@ rust-version.workspace = true
 [dependencies]
 chrono.workspace = true
 dashmap.workspace = true
+hex.workspace = true
+rand.workspace = true

@@ -45,10 +45,10 @@ impl Prober for MockProber {
     }
 }
 
-fn make_state(prober: Arc<dyn Prober>, store: PeerStore, api_key: Option<String>) -> AppState {
+fn make_state(prober: Arc<dyn Prober>, store: PeerStore, api_key: &str) -> AppState {
     let cfg = WebConfig {
         listen: "127.0.0.1:0".parse().unwrap(),
-        api_key,
+        api_key: api_key.to_string(),
         allowed_origins: Vec::new(),
         post_rate_limit: 5,
         rate_limit_window: Duration::from_mins(1),
@@ -103,7 +103,7 @@ fn seeded_store() -> (TempDir, PeerStore) {
 async fn ping_returns_pong() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
     let res = app.oneshot(Request::get("/ping").body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -112,9 +112,9 @@ async fn ping_returns_pong() {
 }
 
 #[tokio::test]
-async fn list_peers_strips_ip_when_api_key_set() {
+async fn list_peers_strips_ip_when_api_key_missing() {
     let (_temp, store) = seeded_store();
-    let state = make_state(Arc::new(MockProber::default()), store, Some("secret".to_string()));
+    let state = make_state(Arc::new(MockProber::default()), store, "secret");
     let app = build_router(state);
 
     // No api key header → ip omitted.
@@ -139,21 +139,10 @@ async fn list_peers_strips_ip_when_api_key_set() {
 }
 
 #[tokio::test]
-async fn list_peers_exposes_ip_with_no_api_key_configured() {
-    let (_temp, store) = seeded_store();
-    let state = make_state(Arc::new(MockProber::default()), store, None);
-    let app = build_router(state);
-    let res = app.oneshot(Request::get("/peers").body(Body::empty()).unwrap()).await.unwrap();
-    let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json[0]["ip"], "1.2.3.4");
-}
-
-#[tokio::test]
 async fn get_peer_returns_404_when_missing() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
     let res = app
         .oneshot(Request::get("/peers/9.9.9.9:16111").body(Body::empty()).unwrap())
@@ -165,10 +154,15 @@ async fn get_peer_returns_404_when_missing() {
 #[tokio::test]
 async fn get_peer_returns_record_by_addr() {
     let (_temp, store) = seeded_store();
-    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
     let res = app
-        .oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/peers/1.2.3.4:16111")
+                .header("x-api-key", "test-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -182,7 +176,7 @@ async fn get_peer_returns_record_by_addr() {
 async fn get_peer_returns_400_on_bad_addr() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
     let res = app
         .oneshot(Request::get("/peers/not-an-addr").body(Body::empty()).unwrap())
@@ -195,7 +189,7 @@ async fn get_peer_returns_400_on_bad_addr() {
 async fn post_peers_rejects_without_api_key() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let state = make_state(Arc::new(MockProber::default()), store, Some("secret".to_string()));
+    let state = make_state(Arc::new(MockProber::default()), store, "secret");
     // We need ConnectInfo present — use into_make_service_with_connect_info path.
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
 
@@ -214,7 +208,7 @@ async fn post_peers_rejects_without_api_key() {
 async fn post_peers_probes_and_returns_record() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let state = make_state(Arc::new(MockProber::default()), store.clone(), None);
+    let state = make_state(Arc::new(MockProber::default()), store.clone(), "test-key");
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
 
     let mut svc = app;
@@ -222,6 +216,7 @@ async fn post_peers_probes_and_returns_record() {
     let req = Request::builder()
         .method(Method::POST)
         .uri("/peers")
+        .header("x-api-key", "test-key")
         .body(Body::from("9.9.9.9:16111"))
         .unwrap();
     let res = conn.call(req).await.unwrap();
@@ -236,7 +231,7 @@ async fn post_peers_probes_and_returns_record() {
 async fn post_peers_returns_502_on_probe_failure() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let state = make_state(Arc::new(MockProber { fail: true }), store, None);
+    let state = make_state(Arc::new(MockProber { fail: true }), store, "test-key");
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
 
     let mut svc = app;
@@ -244,6 +239,7 @@ async fn post_peers_returns_502_on_probe_failure() {
     let req = Request::builder()
         .method(Method::POST)
         .uri("/peers")
+        .header("x-api-key", "test-key")
         .body(Body::from("9.9.9.9:16111"))
         .unwrap();
     let res = conn.call(req).await.unwrap();
@@ -256,7 +252,7 @@ async fn rate_limit_blocks_repeated_posts() {
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let cfg = WebConfig {
         listen: "127.0.0.1:0".parse().unwrap(),
-        api_key: None,
+        api_key: "test-key".to_string(),
         allowed_origins: Vec::new(),
         post_rate_limit: 1,
         rate_limit_window: Duration::from_mins(1),
@@ -282,6 +278,7 @@ async fn rate_limit_blocks_repeated_posts() {
         Request::builder()
             .method(Method::POST)
             .uri("/peers")
+            .header("x-api-key", "test-key")
             .body(Body::from("9.9.9.9:16111"))
             .unwrap()
     };
@@ -296,7 +293,7 @@ async fn rate_limit_blocks_repeated_posts() {
 #[tokio::test]
 async fn get_peer_returns_port() {
     let (_temp, store) = seeded_store();
-    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
     let res = app
         .oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap())
@@ -310,9 +307,12 @@ async fn get_peer_returns_port() {
 #[tokio::test]
 async fn list_peers_uses_camel_case_keys() {
     let (_temp, store) = seeded_store();
-    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
-    let res = app.oneshot(Request::get("/peers").body(Body::empty()).unwrap()).await.unwrap();
+    let res = app
+        .oneshot(Request::get("/peers").header("x-api-key", "test-key").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let entry = &json[0];
@@ -329,7 +329,7 @@ async fn list_peers_uses_camel_case_keys() {
 async fn post_peers_rejects_private_ip() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
 
     let mut svc = app;
@@ -337,6 +337,7 @@ async fn post_peers_rejects_private_ip() {
     let req = Request::builder()
         .method(Method::POST)
         .uri("/peers")
+        .header("x-api-key", "test-key")
         .body(Body::from("10.0.0.1:16111"))
         .unwrap();
     let res = conn.call(req).await.unwrap();
@@ -347,7 +348,7 @@ async fn post_peers_rejects_private_ip() {
 async fn post_peers_rejects_ephemeral_port() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();
 
     let mut svc = app;
@@ -355,6 +356,7 @@ async fn post_peers_rejects_ephemeral_port() {
     let req = Request::builder()
         .method(Method::POST)
         .uri("/peers")
+        .header("x-api-key", "test-key")
         .body(Body::from("1.2.3.4:55000"))
         .unwrap();
     let res = conn.call(req).await.unwrap();
@@ -368,7 +370,7 @@ async fn list_peers_applies_protocol_version_filter_unless_all() {
     // ?all=true should still include it (freshness only).
     let cfg = WebConfig {
         listen: "127.0.0.1:0".parse().unwrap(),
-        api_key: None,
+        api_key: "test-key".to_string(),
         allowed_origins: Vec::new(),
         post_rate_limit: 5,
         rate_limit_window: Duration::from_mins(1),
@@ -420,7 +422,7 @@ async fn list_peers_hides_stubs_in_both_modes() {
     };
     store.insert_stub_if_missing(&net, 0).unwrap();
 
-    let state = make_state(Arc::new(MockProber::default()), store, None);
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
 
     for url in ["/peers", "/peers?all=true"] {
