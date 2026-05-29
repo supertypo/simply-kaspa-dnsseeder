@@ -8,24 +8,11 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use log::warn;
-use serde::Serialize;
-use utoipa::ToSchema;
 
 use simply_kaspa_dnsseeder_common::{duration_to_ms, now_ms};
 
+use crate::dto::HealthResponse;
 use crate::state::AppState;
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct HealthResponse {
-    pub status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reason: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub good: Option<u64>,
-    pub total: u64,
-    pub service: String,
-    pub version: String,
-}
 
 pub(crate) const PATH: &str = "/health";
 

@@ -235,7 +235,8 @@ async fn post_peers_rejects_without_api_key() {
     let req = Request::builder()
         .method(Method::POST)
         .uri("/peers")
-        .body(Body::from("9.9.9.9:16111"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"addrPort":"9.9.9.9:16111"}"#))
         .unwrap();
     let res = conn.call(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
@@ -254,7 +255,8 @@ async fn post_peers_probes_and_returns_record() {
         .method(Method::POST)
         .uri("/peers")
         .header("x-api-key", "test-key")
-        .body(Body::from("9.9.9.9:16111"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"addrPort":"9.9.9.9:16111"}"#))
         .unwrap();
     let res = conn.call(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -277,7 +279,8 @@ async fn post_peers_returns_502_on_probe_failure() {
         .method(Method::POST)
         .uri("/peers")
         .header("x-api-key", "test-key")
-        .body(Body::from("9.9.9.9:16111"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"addrPort":"9.9.9.9:16111"}"#))
         .unwrap();
     let res = conn.call(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_GATEWAY);
@@ -318,7 +321,8 @@ async fn rate_limit_blocks_repeated_posts() {
             .method(Method::POST)
             .uri("/peers")
             .header("x-api-key", "test-key")
-            .body(Body::from("9.9.9.9:16111"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"addrPort":"9.9.9.9:16111"}"#))
             .unwrap()
     };
 
@@ -382,7 +386,8 @@ async fn post_peers_rejects_private_ip() {
         .method(Method::POST)
         .uri("/peers")
         .header("x-api-key", "test-key")
-        .body(Body::from("10.0.0.1:16111"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"addrPort":"10.0.0.1:16111"}"#))
         .unwrap();
     let res = conn.call(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
@@ -401,7 +406,8 @@ async fn post_peers_rejects_ephemeral_port() {
         .method(Method::POST)
         .uri("/peers")
         .header("x-api-key", "test-key")
-        .body(Body::from("1.2.3.4:55000"))
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"addrPort":"1.2.3.4:55000"}"#))
         .unwrap();
     let res = conn.call(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);

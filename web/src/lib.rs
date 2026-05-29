@@ -7,6 +7,7 @@
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 mod api_error;
+mod auth;
 pub mod config;
 pub mod dto;
 pub mod error;
@@ -17,11 +18,11 @@ mod middleware;
 mod openapi;
 mod peers_cache;
 pub mod prober;
+mod request;
 pub mod router;
 pub mod server;
 pub mod state;
 mod system;
-mod util;
 
 #[cfg(test)]
 mod dto_tests;

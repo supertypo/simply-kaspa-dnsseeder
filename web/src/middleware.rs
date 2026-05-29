@@ -9,8 +9,8 @@ use axum::response::{IntoResponse, Response};
 use axum::{body::Body, http::Request};
 
 use crate::api_error::ApiError;
+use crate::auth::authenticated;
 use crate::metrics::{PostRejection, WebMetrics};
-use crate::util::authenticated;
 
 pub(crate) async fn count_requests(State(metrics): State<Arc<WebMetrics>>, req: Request<Body>, next: Next) -> Response {
     metrics.record_request();

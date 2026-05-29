@@ -51,7 +51,7 @@ All HTTP endpoints are served under the `--api-prefix` (default `/api`); pass `-
 | `/api/health` | GET | `200 OK` while at least one peer succeeded inside `--stale-good`, otherwise `503` |
 | `/api/metrics` | GET | JSON dump: process (cpu/mem), disk usage, peer-store summary, per-subsystem counters |
 | `/api/peers` | GET | All peers as JSON, sorted by most-recent success first |
-| `/api/peers` | POST | Body `ip:port`; probes the peer and stores it on success (rate-limited, may need API key) |
+| `/api/peers` | POST | JSON body `{ "addrPort": "ip:port" }`; probes the peer and stores it on success (rate-limited, may need API key) |
 | `/api/peers/{ip:port}` | GET | Single peer lookup |
 
 ### Mainnet example

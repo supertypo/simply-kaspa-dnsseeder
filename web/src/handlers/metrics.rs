@@ -5,88 +5,16 @@ use axum::Json;
 use axum::extract::State;
 use axum::response::{IntoResponse, Response};
 use log::warn;
-use serde::Serialize;
-use serde_json::{Map, Value, json};
-use utoipa::ToSchema;
 
 use simply_kaspa_dnsseeder_common::{duration_to_ms, now_ms};
 use simply_kaspa_dnsseeder_store::Filter;
 
 use crate::api_error::ApiError;
+use crate::dto::{
+    MetricsResponse, PeerCounts, PeerFamilyCounts, PeerStatusCounts, PostRejected, RateLimiterSubsystem, ServiceInfo, WebSubsystem,
+};
 use crate::state::AppState;
-use crate::system::{DiskInfo, ProcessInfo, collect_disk, collect_process};
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct MetricsResponse {
-    pub service: ServiceInfo,
-    pub process: ProcessInfo,
-    pub disk: DiskInfo,
-    pub peers: PeerCounts,
-    #[schema(value_type = Object)]
-    pub subsystems: Map<String, Value>,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct ServiceInfo {
-    pub name: String,
-    pub version: String,
-    pub commit: String,
-    pub network: String,
-    pub uptime_secs: u64,
-    #[schema(value_type = u64)]
-    pub uptime_ms: u128,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct PeerCounts {
-    pub total: u64,
-    pub by_status: PeerStatusCounts,
-    pub by_family: PeerFamilyCounts,
-    pub avg_success_age_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct PeerStatusCounts {
-    pub good: u64,
-    pub filtered: u64,
-    pub stale: u64,
-    pub failed: u64,
-    pub stub: u64,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct PeerFamilyCounts {
-    pub v4: u64,
-    pub v6: u64,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct WebSubsystem {
-    pub requests: u64,
-    pub accepted: u64,
-    pub rejected: u64,
-    pub post_rejected: PostRejected,
-    pub rate_limiter: RateLimiterSubsystem,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct PostRejected {
-    pub auth: u64,
-    pub ratelimit: u64,
-    pub format: u64,
-    pub unroutable: u64,
-    pub probe: u64,
-}
-
-/// Per-IP token-bucket gauges. Invariant: `denied ≤ ops`.
-#[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct RateLimiterSubsystem {
-    pub capacity: u32,
-    pub window_ms: u64,
-    pub ops: u64,
-    pub tracked_ips: usize,
-    pub denied: u64,
-}
+use crate::system::{collect_disk, collect_process};
 
 pub(crate) const PATH: &str = "/metrics";
 
@@ -125,17 +53,14 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
     let disk = collect_disk(&state.config.db_path);
     let web = state.obs.metrics.snapshot();
     let elapsed = state.obs.started.elapsed();
-    let mut subsystems = match state.obs.metrics_source.extra() {
-        Value::Object(map) => map,
-        _ => Map::new(),
-    };
+    let mut subsystems = state.obs.metrics_source.extra();
     let web_subsystem = WebSubsystem {
         requests: web.requests,
         accepted: web.accepted,
         rejected: web.rejected,
         post_rejected: PostRejected {
             auth: web.post_rejected_auth,
-            ratelimit: web.post_rejected_ratelimit,
+            rate_limit: web.post_rejected_ratelimit,
             format: web.post_rejected_format,
             unroutable: web.post_rejected_unroutable,
             probe: web.post_rejected_probe,
@@ -148,7 +73,10 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
             denied: web.post_rejected_ratelimit,
         },
     };
-    subsystems.insert("web".to_string(), json!(web_subsystem));
+    subsystems.insert(
+        "web".to_string(),
+        serde_json::to_value(&web_subsystem).expect("WebSubsystem is plain data and serializes infallibly"),
+    );
     let response = MetricsResponse {
         service: ServiceInfo {
             name: state.config.service_name.to_string(),

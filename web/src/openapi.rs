@@ -3,12 +3,11 @@
 use utoipa::OpenApi;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 
-use crate::dto::{FullPeerDto, PeerDto, PublicPeerDto};
-use crate::handlers::health::HealthResponse;
-use crate::handlers::metrics::{
-    MetricsResponse, PeerCounts, PeerFamilyCounts, PeerStatusCounts, PostRejected, RateLimiterSubsystem, ServiceInfo, WebSubsystem,
+use crate::dto::{
+    CrawlerSubsystem, DiskInfo, DnsRateLimiterSubsystem, DnsSubsystem, FullPeerDto, HealthResponse, MetricsResponse, PeerCounts,
+    PeerDto, PeerFamilyCounts, PeerStatusCounts, PostRejected, ProcessInfo, PublicPeerDto, RateLimiterSubsystem, ServiceInfo,
+    ServingCacheSubsystem, SubmitPeerRequest, WebSubsystem,
 };
-use crate::system::{DiskInfo, ProcessInfo};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -33,11 +32,16 @@ use crate::system::{DiskInfo, ProcessInfo};
         WebSubsystem,
         PostRejected,
         RateLimiterSubsystem,
+        CrawlerSubsystem,
+        DnsSubsystem,
+        DnsRateLimiterSubsystem,
+        ServingCacheSubsystem,
         ProcessInfo,
         DiskInfo,
         PeerDto,
         FullPeerDto,
         PublicPeerDto,
+        SubmitPeerRequest,
     )),
     tags(
         (name = "info", description = "Health and metrics"),

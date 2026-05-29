@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::path::Path;
 use std::time::Duration;
 
 use axum_server::Handle;
@@ -7,11 +8,29 @@ use log::{info, warn};
 use tokio::sync::broadcast;
 use tokio::task::JoinSet;
 
-use crate::error::Error;
+use crate::error::{Error, TlsFile};
 use crate::router::build_router;
 use crate::state::AppState;
 
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
+async fn load_tls(cert: &Path, key: &Path) -> Result<RustlsConfig, Error> {
+    let cert_bytes = tokio::fs::read(cert).await.map_err(|source| Error::Tls {
+        kind: TlsFile::Cert,
+        path: cert.to_path_buf(),
+        source,
+    })?;
+    let key_bytes = tokio::fs::read(key).await.map_err(|source| Error::Tls {
+        kind: TlsFile::Key,
+        path: key.to_path_buf(),
+        source,
+    })?;
+    RustlsConfig::from_pem(cert_bytes, key_bytes).await.map_err(|source| Error::Tls {
+        kind: TlsFile::Cert,
+        path: cert.to_path_buf(),
+        source,
+    })
+}
 
 /// Run the HTTP(S) server until shutdown.
 pub async fn run_web_server(state: AppState, mut shutdown: broadcast::Receiver<()>) -> Result<(), Error> {
@@ -35,7 +54,7 @@ pub async fn run_web_server(state: AppState, mut shutdown: broadcast::Receiver<(
         if rustls::crypto::ring::default_provider().install_default().is_err() {
             warn!("rustls: default crypto provider was already installed");
         }
-        Some(RustlsConfig::from_pem_file(&cert, &key).await.map_err(Error::Tls)?)
+        Some(load_tls(&cert, &key).await?)
     } else {
         None
     };

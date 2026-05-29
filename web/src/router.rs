@@ -19,7 +19,20 @@ use crate::handlers::{health, metrics, peers};
 use crate::middleware::{AuthState, count_requests, require_api_key};
 use crate::openapi;
 use crate::state::AppState;
-use crate::util::normalize_prefix;
+
+/// Normalize an URL prefix: trim trailing `/`, ensure a leading `/`. Empty input
+/// returns empty (router serves at root).
+fn normalize_prefix(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    }
+}
 
 pub fn build_router(state: AppState) -> Router {
     let prefix = normalize_prefix(&state.config.api_prefix);

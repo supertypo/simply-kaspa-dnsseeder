@@ -10,7 +10,7 @@ Three cooperating loops driven from one binary:
 
 1. **Crawler** (`crawler::Scheduler`) — periodic ticker drains eligible peers from the store, dispatches bounded-concurrency probes, persists results.
 2. **DNS server** (`dns::SeederHandler`) — answers `A` / `AAAA` / `NS` / `SOA` from a small in-memory `ServingCache` periodically rebuilt from the store; the handler itself never touches redb on the request path.
-3. **HTTP API** (`web`) — `axum` router under a configurable `--api-prefix` (default `/api`): `/ping`, `/health`, `/metrics`, `/peers` (GET/POST), `/peers/{ip:port}`. Handlers live in `web/src/handlers/{health,metrics,peers}.rs`; routing in `router.rs`; sysinfo collection in `system.rs`; tiny helpers in `util.rs`.
+3. **HTTP API** (`web`) — `axum` router under a configurable `--api-prefix` (default `/api`): `/ping`, `/health`, `/metrics`, `/peers` (GET/POST), `/peers/{ip:port}`. Handlers live in `web/src/handlers/{health,metrics,peers}.rs`; routing in `router.rs`; sysinfo collection in `system.rs`; auth helpers in `auth.rs`; request inspection in `request.rs`. Response shapes live exclusively in `web/src/dto/` — handlers must not define DTOs inline, and subsystem JSON contributed via `MetricsSource` must come from typed `dto::subsystems::*` DTOs serialized through `serde_json::to_value`, never the `json!` macro.
 
 A fourth task — `dnsseeder::stats::stats_loop` — emits a single info-level stats block on `--stats-interval` (default `1m`, `0s` disables) and persists cumulative counters to the store so totals survive restarts.
 

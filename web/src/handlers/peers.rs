@@ -1,6 +1,6 @@
 //! Peer-related handlers: list, lookup, submit.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 
 use axum::Json;
@@ -13,13 +13,13 @@ use simply_kaspa_dnsseeder_crawler::is_acceptable_address;
 use simply_kaspa_dnsseeder_store::{Filter, NetAddress};
 
 use crate::api_error::ApiError;
+use crate::auth::authenticated;
 use crate::config::WebConfig;
-use crate::dto::PeerDto;
+use crate::dto::{PeerDto, SubmitPeerRequest};
 use crate::metrics::PostRejection;
+use crate::request::client_ip;
 use crate::state::AppState;
-use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
-
-use crate::util::{authenticated, client_ip};
+use simply_kaspa_dnsseeder_common::{RateLimiter, canonicalize_ip, duration_to_ms, now_ms};
 
 /// Hard cap on `GET /peers` response size to prevent OOM. Clients needing
 /// bulk data should use the DNS interface.
@@ -67,31 +67,36 @@ pub(crate) const SUBMIT_PATH: &str = "/peers";
 pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>, headers: HeaderMap) -> Response {
     let expose = authenticated(&headers, &state.config.api_key);
     let cache_key = crate::peers_cache::Key { all: q.all, expose };
-    if let Some(body) = state.peers_cache.get(cache_key) {
-        return ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response();
+    let result = state
+        .peers_cache
+        .get_or_compute(cache_key, || compute_list_body(state.clone(), q.all, expose))
+        .await;
+    match result {
+        Ok(body) => ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response(),
+        Err(err) => err.into_response(),
     }
-    let filter = list_filter(&state.config, q.all);
-    let mut records = match state.runtime.store.blocking(move |s| s.collect_matching(&filter)).await {
-        Ok(v) => v,
-        Err(err) => {
+}
+
+async fn compute_list_body(state: AppState, all: bool, expose: bool) -> Result<axum::body::Bytes, ApiError> {
+    let filter = list_filter(&state.config, all);
+    let mut records = state
+        .runtime
+        .store
+        .blocking(move |s| s.collect_matching(&filter))
+        .await
+        .map_err(|err| {
             warn!("web: GET /peers store error: {err}");
-            return ApiError::Internal("store error").into_response();
-        }
-    };
+            ApiError::Internal("store error")
+        })?;
     records.sort_by_key(|r| std::cmp::Reverse(r.last_success_ms));
     if records.len() > MAX_LIST_RESPONSE {
         records.truncate(MAX_LIST_RESPONSE);
     }
     let dtos: Vec<PeerDto> = records.iter().map(|r| PeerDto::from_record(r, expose)).collect();
-    let body = match serde_json::to_vec(&dtos) {
-        Ok(v) => axum::body::Bytes::from(v),
-        Err(err) => {
-            warn!("web: GET /peers serialize error: {err}");
-            return ApiError::Internal("serialize error").into_response();
-        }
-    };
-    state.peers_cache.put(cache_key, body.clone());
-    ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response()
+    serde_json::to_vec(&dtos).map(axum::body::Bytes::from).map_err(|err| {
+        warn!("web: GET /peers serialize error: {err}");
+        ApiError::Internal("serialize error")
+    })
 }
 
 #[utoipa::path(
@@ -129,11 +134,57 @@ pub(crate) async fn get(State(state): State<AppState>, Path(addr_port): Path<Str
     }
 }
 
+/// Reasons a `POST /peers` body is rejected before the probe stage.
+enum SubmitRejection {
+    RateLimit,
+    Format,
+    Unroutable,
+}
+
+impl SubmitRejection {
+    fn as_post_rejection(&self) -> PostRejection {
+        match self {
+            Self::RateLimit => PostRejection::RateLimit,
+            Self::Format => PostRejection::Format,
+            Self::Unroutable => PostRejection::Unroutable,
+        }
+    }
+
+    fn into_api_error(self) -> ApiError {
+        match self {
+            Self::RateLimit => ApiError::RateLimited("rate limited"),
+            Self::Format => ApiError::BadRequest("invalid ip:port"),
+            Self::Unroutable => ApiError::BadRequest("address is not publicly routable or uses a disallowed port"),
+        }
+    }
+}
+
+/// Run all pre-probe checks: rate limit, parse, canonicalize, routability.
+fn validate_submission(
+    addr_port: &str,
+    client: IpAddr,
+    cfg: &WebConfig,
+    limiter: &RateLimiter,
+) -> Result<SocketAddr, SubmitRejection> {
+    if !limiter.check(client) {
+        return Err(SubmitRejection::RateLimit);
+    }
+    let addr = SocketAddr::from_str(addr_port.trim()).map_err(|_| SubmitRejection::Format)?;
+    let net = NetAddress {
+        ip: canonicalize_ip(addr.ip()),
+        port: addr.port(),
+    };
+    if !is_acceptable_address(&net, cfg.network_default_port, cfg.strict_port) {
+        return Err(SubmitRejection::Unroutable);
+    }
+    Ok(SocketAddr::new(net.ip, net.port))
+}
+
 #[utoipa::path(
     post,
     path = SUBMIT_PATH,
     tag = "peers",
-    request_body(content = String, description = "Peer address as ip:port", content_type = "text/plain"),
+    request_body = SubmitPeerRequest,
     responses(
         (status = 200, description = "Peer probed and accepted", body = PeerDto),
         (status = 400, description = "Bad address or not publicly routable"),
@@ -147,29 +198,16 @@ pub(crate) async fn submit(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    body: String,
+    Json(body): Json<SubmitPeerRequest>,
 ) -> Response {
     let client = client_ip(&headers, remote);
-    if !state.limiter.check(client) {
-        state.obs.metrics.record_post_rejection(PostRejection::RateLimit);
-        return ApiError::RateLimited("rate limited").into_response();
-    }
-
-    let Ok(addr) = SocketAddr::from_str(body.trim()) else {
-        state.obs.metrics.record_post_rejection(PostRejection::Format);
-        return ApiError::BadRequest("invalid ip:port").into_response();
+    let addr = match validate_submission(&body.addr_port, client, &state.config, &state.limiter) {
+        Ok(addr) => addr,
+        Err(rej) => {
+            state.obs.metrics.record_post_rejection(rej.as_post_rejection());
+            return rej.into_api_error().into_response();
+        }
     };
-
-    let net = NetAddress {
-        ip: canonicalize_ip(addr.ip()),
-        port: addr.port(),
-    };
-    if !is_acceptable_address(&net, state.config.network_default_port, state.config.strict_port) {
-        state.obs.metrics.record_post_rejection(PostRejection::Unroutable);
-        return ApiError::BadRequest("address is not publicly routable or uses a disallowed port").into_response();
-    }
-    let addr = SocketAddr::new(net.ip, net.port);
-
     match state.runtime.prober.probe(addr).await {
         Ok(rec) => {
             state.obs.metrics.record_accepted();

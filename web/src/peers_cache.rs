@@ -1,5 +1,6 @@
 //! Tiny TTL cache for `GET /peers` responses, keyed by `(all, expose)`.
 
+use std::future::Future;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -46,5 +47,21 @@ impl PeersCache {
             body,
             inserted: Instant::now(),
         });
+    }
+
+    /// Return the cached body for `key`, or run `compute` to produce it, store
+    /// it, and return it. The cache lookup/store-around protocol stays
+    /// invisible to callers.
+    pub async fn get_or_compute<F, Fut, E>(&self, key: Key, compute: F) -> Result<Bytes, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Bytes, E>>,
+    {
+        if let Some(hit) = self.get(key) {
+            return Ok(hit);
+        }
+        let body = compute().await?;
+        self.put(key, body.clone());
+        Ok(body)
     }
 }
