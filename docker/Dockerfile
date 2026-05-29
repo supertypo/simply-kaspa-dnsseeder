@@ -57,6 +57,9 @@ RUN apk --no-cache add \
 
 COPY --from=builder /work/target/release/simply-kaspa-dnsseeder /usr/local/bin/
 
+RUN mkdir /data \
+  && chown 13337:13337 /data
+
 USER 13337:13337
 
 ARG VERSION
