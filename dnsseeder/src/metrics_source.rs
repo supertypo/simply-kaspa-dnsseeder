@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
-use simply_kaspa_dnsseeder_common::now_ms;
+use simply_kaspa_dnsseeder_common::{RateLimiter, now_ms};
 use simply_kaspa_dnsseeder_crawler::CrawlerMetrics;
 use simply_kaspa_dnsseeder_dns::{DnsMetrics, ServingCache};
 use simply_kaspa_dnsseeder_web::MetricsSource;
@@ -13,6 +13,7 @@ use simply_kaspa_dnsseeder_web::MetricsSource;
 pub struct SubsystemMetrics {
     pub crawler: Arc<CrawlerMetrics>,
     pub dns: Arc<DnsMetrics>,
+    pub dns_limiter: Option<Arc<RateLimiter>>,
     pub serving_cache: Option<Arc<ServingCache>>,
 }
 
@@ -20,6 +21,16 @@ impl MetricsSource for SubsystemMetrics {
     fn extra(&self) -> Value {
         let c = self.crawler.snapshot();
         let d = self.dns.snapshot();
+        let dns_rate_limiter = match self.dns_limiter.as_ref() {
+            Some(rl) => json!({
+                "capacity": rl.capacity(),
+                "window_ms": u64::try_from(rl.window().as_millis()).unwrap_or(u64::MAX),
+                "ops": rl.ops(),
+                "tracked_ips": rl.tracked_ips(),
+                "denied": d.denied,
+            }),
+            None => json!({ "denied": d.denied }),
+        };
         let mut out = json!({
             "crawler": {
                 "ok": c.ok,
@@ -36,9 +47,9 @@ impl MetricsSource for SubsystemMetrics {
                 "answered": d.answered,
                 "empty": d.empty,
                 "refused": d.refused,
-                "throttled": d.throttled,
                 "a": d.a,
                 "aaaa": d.aaaa,
+                "rate_limiter": dns_rate_limiter,
             },
         });
         if let Some(cache) = self.serving_cache.as_ref() {

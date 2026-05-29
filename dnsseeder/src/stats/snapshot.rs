@@ -44,7 +44,7 @@ pub(super) struct DnsSnap {
     pub answered: u64,
     pub empty: u64,
     pub refused: u64,
-    pub throttled: u64,
+    pub denied: u64,
     pub a: u64,
     pub aaaa: u64,
 }
@@ -78,7 +78,7 @@ impl MetricsSnapshot {
                 answered: dns.answered,
                 empty: dns.empty,
                 refused: dns.refused,
-                throttled: dns.throttled,
+                denied: dns.denied,
                 a: dns.a,
                 aaaa: dns.aaaa,
             },
@@ -112,7 +112,7 @@ impl MetricsSnapshot {
             answered: self.dns.answered,
             empty: self.dns.empty,
             refused: self.dns.refused,
-            throttled: self.dns.throttled,
+            denied: self.dns.denied,
             a: self.dns.a,
             aaaa: self.dns.aaaa,
         });

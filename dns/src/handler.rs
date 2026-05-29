@@ -81,6 +81,11 @@ impl SeederHandler {
         self.metrics.clone()
     }
 
+    #[must_use]
+    pub fn rate_limiter(&self) -> Arc<RateLimiter> {
+        self.rate_limit.clone()
+    }
+
     fn build_answers(&self, qtype: RecordType) -> Vec<Record> {
         match qtype {
             RecordType::A => self.sample_address_records(Family::V4),
@@ -209,7 +214,7 @@ impl RequestHandler for SeederHandler {
         // Silent drop: emit no bytes so the seeder offers zero amplification.
         if !self.rate_limit.check(src.ip()) {
             debug!("dns: rate-limited query from {}", src.ip());
-            self.metrics.record_throttled();
+            self.metrics.record_denied();
             return no_response();
         }
 

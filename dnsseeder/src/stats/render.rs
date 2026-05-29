@@ -84,8 +84,8 @@ pub(super) fn render(b: &Block) -> Vec<String> {
         &count(b.dns.a),
         "AAAA",
         &count(b.dns.aaaa),
-        "throttled",
-        &count(b.dns.throttled),
+        "denied",
+        &count(b.dns.denied),
     ));
     out.push(RULE_MID.to_string());
     out.push(row(

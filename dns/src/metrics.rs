@@ -7,7 +7,8 @@ pub struct DnsMetrics {
     pub answered: AtomicU64,
     pub empty: AtomicU64,
     pub refused: AtomicU64,
-    pub throttled: AtomicU64,
+    /// Queries denied by the per-IP rate limiter.
+    pub denied: AtomicU64,
     pub a: AtomicU64,
     pub aaaa: AtomicU64,
 }
@@ -35,8 +36,8 @@ impl DnsMetrics {
         self.refused.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn record_throttled(&self) {
-        self.throttled.fetch_add(1, Ordering::Relaxed);
+    pub fn record_denied(&self) {
+        self.denied.fetch_add(1, Ordering::Relaxed);
     }
 
     #[must_use]
@@ -45,7 +46,7 @@ impl DnsMetrics {
             answered: self.answered.load(Ordering::Relaxed),
             empty: self.empty.load(Ordering::Relaxed),
             refused: self.refused.load(Ordering::Relaxed),
-            throttled: self.throttled.load(Ordering::Relaxed),
+            denied: self.denied.load(Ordering::Relaxed),
             a: self.a.load(Ordering::Relaxed),
             aaaa: self.aaaa.load(Ordering::Relaxed),
         }
@@ -55,7 +56,7 @@ impl DnsMetrics {
         self.answered.store(snap.answered, Ordering::Relaxed);
         self.empty.store(snap.empty, Ordering::Relaxed);
         self.refused.store(snap.refused, Ordering::Relaxed);
-        self.throttled.store(snap.throttled, Ordering::Relaxed);
+        self.denied.store(snap.denied, Ordering::Relaxed);
         self.a.store(snap.a, Ordering::Relaxed);
         self.aaaa.store(snap.aaaa, Ordering::Relaxed);
     }
@@ -66,7 +67,7 @@ pub struct DnsSnapshot {
     pub answered: u64,
     pub empty: u64,
     pub refused: u64,
-    pub throttled: u64,
+    pub denied: u64,
     pub a: u64,
     pub aaaa: u64,
 }

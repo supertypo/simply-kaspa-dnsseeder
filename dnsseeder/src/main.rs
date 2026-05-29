@@ -84,6 +84,7 @@ async fn run(cli: CliArgs) -> Result<()> {
     });
 
     let mut serving_cache_handle: Option<Arc<simply_kaspa_dnsseeder_dns::ServingCache>> = None;
+    let mut dns_limiter: Option<Arc<simply_kaspa_dnsseeder_common::RateLimiter>> = None;
     let dns_task = if cli.dns_enabled() {
         let dns_listen = cli.dns.dns_listen.clone();
         let dns_cfg = DnsConfig {
@@ -102,6 +103,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         let (serving_cache, _refresher) = build_serving_cache(&dns_cfg, store.clone(), shutdown_tx.subscribe());
         serving_cache_handle = Some(serving_cache.clone());
         let handler = SeederHandler::with_metrics(dns_cfg, serving_cache, metrics.dns.clone()).context("building dns handler")?;
+        dns_limiter = Some(handler.rate_limiter());
         Some(tokio::spawn(async move {
             match simply_kaspa_dnsseeder_dns::run_dns_server_with_handler(handler, dns_listen, tcp_idle, dns_shutdown).await {
                 Ok(()) => info!("dns: shut down cleanly"),
@@ -146,6 +148,7 @@ async fn run(cli: CliArgs) -> Result<()> {
     let metrics_source: Arc<dyn MetricsSource> = Arc::new(SubsystemMetrics {
         crawler: metrics.crawler.clone(),
         dns: metrics.dns.clone(),
+        dns_limiter: dns_limiter.clone(),
         serving_cache: serving_cache_handle.clone(),
     });
     let state = AppState::builder(store.clone(), prober, web_cfg)

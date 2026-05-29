@@ -66,6 +66,7 @@ pub struct WebSubsystem {
     pub accepted: u64,
     pub rejected: u64,
     pub post_rejected: PostRejected,
+    pub rate_limiter: RateLimiterSubsystem,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -77,10 +78,14 @@ pub struct PostRejected {
     pub probe: u64,
 }
 
+/// Per-IP token-bucket gauges. Invariant: `denied ≤ ops`.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RateLimiterSubsystem {
+    pub capacity: u32,
+    pub window_ms: u64,
     pub ops: u64,
     pub tracked_ips: usize,
+    pub denied: u64,
 }
 
 pub(crate) const PATH: &str = "/metrics";
@@ -135,13 +140,15 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
             unroutable: web.post_rejected_unroutable,
             probe: web.post_rejected_probe,
         },
-    };
-    let rate_limiter_subsystem = RateLimiterSubsystem {
-        ops: state.limiter.ops(),
-        tracked_ips: state.limiter.tracked_ips(),
+        rate_limiter: RateLimiterSubsystem {
+            capacity: state.limiter.capacity(),
+            window_ms: u64::try_from(state.limiter.window().as_millis()).unwrap_or(u64::MAX),
+            ops: state.limiter.ops(),
+            tracked_ips: state.limiter.tracked_ips(),
+            denied: web.post_rejected_ratelimit,
+        },
     };
     subsystems.insert("web".to_string(), json!(web_subsystem));
-    subsystems.insert("rate_limiter".to_string(), json!(rate_limiter_subsystem));
     let response = MetricsResponse {
         service: ServiceInfo {
             name: state.config.service_name.to_string(),

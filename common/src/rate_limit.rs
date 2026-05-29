@@ -83,6 +83,18 @@ impl RateLimiter {
         self.buckets.len()
     }
 
+    /// Configured per-window token capacity. `0` means the limiter is disabled.
+    #[must_use]
+    pub fn capacity(&self) -> u32 {
+        self.capacity
+    }
+
+    /// Configured refill window.
+    #[must_use]
+    pub fn window(&self) -> Duration {
+        self.window
+    }
+
     #[doc(hidden)]
     pub fn force_sweep(&self) {
         self.buckets.retain(|_, b| Instant::now() < b.refill_at);
