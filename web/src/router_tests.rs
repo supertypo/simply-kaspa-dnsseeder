@@ -112,30 +112,67 @@ async fn ping_returns_pong() {
 }
 
 #[tokio::test]
-async fn list_peers_strips_ip_when_api_key_missing() {
+async fn list_peers_strips_ip_when_unauthenticated() {
     let (_temp, store) = seeded_store();
     let state = make_state(Arc::new(MockProber::default()), store, "secret");
     let app = build_router(state);
 
-    // No api key header → ip omitted.
+    // No api key header → 200, ip stripped. Same for ?all=true.
+    for url in ["/peers", "/peers?all=true"] {
+        let res = app.clone().oneshot(Request::get(url).body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "{url}");
+        let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+        assert!(!body.windows(7).any(|w| w == b"1.2.3.4"), "{url} leaked ip without auth");
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json[0]["ip"], serde_json::Value::Null);
+    }
+
+    // Wrong api key → still treated as unauthenticated (ip stripped).
     let res = app
         .clone()
-        .oneshot(Request::get("/peers").body(Body::empty()).unwrap())
+        .oneshot(Request::get("/peers").header("x-api-key", "wrong").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
-    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json[0]["ip"], serde_json::Value::Null);
+    assert!(!body.windows(7).any(|w| w == b"1.2.3.4"));
 
     // Correct api key → ip exposed.
     let res = app
         .oneshot(Request::get("/peers").header("x-api-key", "secret").body(Body::empty()).unwrap())
         .await
         .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json[0]["ip"], "1.2.3.4");
+}
+
+#[tokio::test]
+async fn get_peer_requires_api_key() {
+    let (_temp, store) = seeded_store();
+    let state = make_state(Arc::new(MockProber::default()), store, "secret");
+    let app = build_router(state);
+
+    let res = app
+        .clone()
+        .oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+    assert!(!body.windows(7).any(|w| w == b"1.2.3.4"), "leaked ip without auth");
+
+    let res = app
+        .oneshot(
+            Request::get("/peers/1.2.3.4:16111")
+                .header("x-api-key", "wrong")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -145,7 +182,12 @@ async fn get_peer_returns_404_when_missing() {
     let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
     let res = app
-        .oneshot(Request::get("/peers/9.9.9.9:16111").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/peers/9.9.9.9:16111")
+                .header("x-api-key", "test-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
@@ -179,7 +221,12 @@ async fn get_peer_returns_400_on_bad_addr() {
     let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
     let res = app
-        .oneshot(Request::get("/peers/not-an-addr").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/peers/not-an-addr")
+                .header("x-api-key", "test-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
@@ -296,7 +343,12 @@ async fn get_peer_returns_port() {
     let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);
     let res = app
-        .oneshot(Request::get("/peers/1.2.3.4:16111").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/peers/1.2.3.4:16111")
+                .header("x-api-key", "test-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
@@ -391,7 +443,7 @@ async fn list_peers_applies_protocol_version_filter_unless_all() {
 
     let res = app
         .clone()
-        .oneshot(Request::get("/peers").body(Body::empty()).unwrap())
+        .oneshot(Request::get("/peers").header("x-api-key", "test-key").body(Body::empty()).unwrap())
         .await
         .unwrap();
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
@@ -399,7 +451,12 @@ async fn list_peers_applies_protocol_version_filter_unless_all() {
     assert_eq!(json.as_array().unwrap().len(), 0, "default list filters out protocol_version < 10");
 
     let res = app
-        .oneshot(Request::get("/peers?all=true").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::get("/peers?all=true")
+                .header("x-api-key", "test-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
@@ -426,7 +483,11 @@ async fn list_peers_hides_stubs_in_both_modes() {
     let app = build_router(state);
 
     for url in ["/peers", "/peers?all=true"] {
-        let res = app.clone().oneshot(Request::get(url).body(Body::empty()).unwrap()).await.unwrap();
+        let res = app
+            .clone()
+            .oneshot(Request::get(url).header("x-api-key", "test-key").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
         let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json.as_array().unwrap().len(), 0, "stubs must never appear (url={url})");

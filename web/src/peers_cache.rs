@@ -1,4 +1,4 @@
-//! Tiny TTL cache for `GET /peers` responses, keyed by `(all, expose_ip)`.
+//! Tiny TTL cache for `GET /peers` responses, keyed by `(all, expose)`.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

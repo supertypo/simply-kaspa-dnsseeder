@@ -17,7 +17,7 @@ use crate::dto::PeerDto;
 use crate::state::AppState;
 use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
 
-use crate::util::{X_API_KEY, client_ip, expose_ip};
+use crate::util::{authenticated, client_ip};
 
 /// Hard cap on `GET /peers` response size to prevent OOM. Clients needing
 /// bulk data should use the DNS interface.
@@ -53,7 +53,7 @@ pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {
 
 pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>, headers: HeaderMap) -> Response {
     state.obs.metrics.record_request();
-    let expose = expose_ip(&headers, &state.config.api_key);
+    let expose = authenticated(&headers, &state.config.api_key);
     let cache_key = crate::peers_cache::Key { all: q.all, expose };
     if let Some(body) = state.peers_cache.get(cache_key) {
         return ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response();
@@ -89,6 +89,9 @@ pub(crate) async fn get(
     headers: HeaderMap,
 ) -> Response {
     state.obs.metrics.record_request();
+    if !authenticated(&headers, &state.config.api_key) {
+        return (StatusCode::UNAUTHORIZED, "missing or invalid api key").into_response();
+    }
     let Ok(addr) = SocketAddr::from_str(&addr_str) else {
         return (StatusCode::BAD_REQUEST, "addr must be ip:port").into_response();
     };
@@ -98,10 +101,7 @@ pub(crate) async fn get(
     };
     let filter = list_filter(&state.config, q.all);
     match state.runtime.store.blocking(move |s| s.get(&net)).await {
-        Ok(Some(rec)) if filter.matches(&rec) => {
-            let expose = expose_ip(&headers, &state.config.api_key);
-            Json(PeerDto::from_record(&rec, expose)).into_response()
-        }
+        Ok(Some(rec)) if filter.matches(&rec) => Json(PeerDto::from_record(&rec, true)).into_response(),
         Ok(_) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
         Err(err) => {
             warn!("web: GET /peers/<addr> store error: {err}");
@@ -117,8 +117,7 @@ pub(crate) async fn submit(
     body: String,
 ) -> Response {
     state.obs.metrics.record_request();
-    let presented = headers.get(&X_API_KEY).and_then(|v| v.to_str().ok());
-    if presented != Some(state.config.api_key.as_str()) {
+    if !authenticated(&headers, &state.config.api_key) {
         state.obs.metrics.record_post_rejected_auth();
         return (StatusCode::UNAUTHORIZED, "missing or invalid api key").into_response();
     }
@@ -160,8 +159,7 @@ pub(crate) async fn submit(
         Ok(rec) => {
             state.obs.metrics.record_accepted();
             debug!("web: POST /peers accepted {addr} (probe ok)");
-            let expose = expose_ip(&headers, &state.config.api_key);
-            (StatusCode::OK, Json(PeerDto::from_record(&rec, expose))).into_response()
+            (StatusCode::OK, Json(PeerDto::from_record(&rec, true))).into_response()
         }
         Err(err) => {
             state.obs.metrics.record_post_rejected_probe();
