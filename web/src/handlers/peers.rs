@@ -33,7 +33,7 @@ pub(crate) struct ListQuery {
     all: bool,
 }
 
-/// Build the filter used by `GET /peers` and `GET /peers/{addr}`. Always
+/// Build the filter used by `GET /peers` and `GET /peers/{addr_port}`. Always
 /// enforces the stale-good window (which also implicitly hides stubs, since
 /// stubs have `last_success_ms = 0`). When `all` is false, also enforces the
 /// configured protocol-version and user-agent floors, matching the DNS path.
@@ -49,7 +49,7 @@ fn list_filter(cfg: &WebConfig, all: bool) -> Filter {
 }
 
 pub(crate) const LIST_PATH: &str = "/peers";
-pub(crate) const GET_PATH: &str = "/peers/{addr}";
+pub(crate) const GET_PATH: &str = "/peers/{addr_port}";
 pub(crate) const SUBMIT_PATH: &str = "/peers";
 
 #[utoipa::path(
@@ -62,6 +62,7 @@ pub(crate) const SUBMIT_PATH: &str = "/peers";
     responses(
         (status = 200, description = "List of peers (IPs stripped without valid X-API-KEY)", body = [PeerDto]),
     ),
+    security((), ("api_key" = [])),
 )]
 pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>, headers: HeaderMap) -> Response {
     let expose = authenticated(&headers, &state.config.api_key);
@@ -98,7 +99,7 @@ pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuer
     path = GET_PATH,
     tag = "peers",
     params(
-        ("addr" = String, Path, description = "Peer address as ip:port"),
+        ("addr_port" = String, Path, description = "Peer address as ip:port (IPv6 wrapped in brackets, e.g. [::1]:16111)"),
         ("all" = Option<bool>, Query, description = "Bypass protocol-version and user-agent filters"),
     ),
     responses(
@@ -109,8 +110,8 @@ pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuer
     ),
     security(("api_key" = [])),
 )]
-pub(crate) async fn get(State(state): State<AppState>, Path(addr_str): Path<String>, Query(q): Query<ListQuery>) -> Response {
-    let Ok(addr) = SocketAddr::from_str(&addr_str) else {
+pub(crate) async fn get(State(state): State<AppState>, Path(addr_port): Path<String>, Query(q): Query<ListQuery>) -> Response {
+    let Ok(addr) = SocketAddr::from_str(&addr_port) else {
         return ApiError::BadRequest("addr must be ip:port").into_response();
     };
     let net = NetAddress {

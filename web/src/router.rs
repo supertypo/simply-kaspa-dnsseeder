@@ -13,7 +13,7 @@ use axum::routing::{get, post};
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
-use utoipa_swagger_ui::SwaggerUi;
+use utoipa_swagger_ui::{Config, SwaggerUi};
 
 use crate::handlers::{health, metrics, peers};
 use crate::middleware::{AuthState, count_requests, require_api_key};
@@ -33,7 +33,7 @@ pub fn build_router(state: AppState) -> Router {
 
     let gated = Router::new()
         .route(&p("/peers"), post(peers::submit))
-        .route(&p("/peers/{addr}"), get(peers::get))
+        .route(&p("/peers/{addr_port}"), get(peers::get))
         .route_layer(from_fn_with_state(auth_state, require_api_key));
 
     let open = Router::new()
@@ -47,7 +47,10 @@ pub fn build_router(state: AppState) -> Router {
         prefix.clone()
     };
     let openapi_url = format!("{swagger_base}/openapi.json");
-    let swagger: Router<AppState> = SwaggerUi::new(swagger_base).url(openapi_url, openapi::document(&prefix)).into();
+    let swagger: Router<AppState> = SwaggerUi::new(swagger_base)
+        .url(openapi_url, openapi::document(&prefix))
+        .config(Config::default().try_it_out_enabled(true).use_base_layout())
+        .into();
 
     open.merge(gated)
         .merge(swagger)

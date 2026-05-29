@@ -59,7 +59,11 @@ impl utoipa::Modify for SecurityAddon {
 pub(crate) fn document(base_path: &str) -> utoipa::openapi::OpenApi {
     let mut doc = ApiDoc::openapi();
     if !base_path.is_empty() {
-        doc.servers = Some(vec![utoipa::openapi::ServerBuilder::new().url(base_path).build()]);
+        let prefixed = std::mem::take(&mut doc.paths.paths)
+            .into_iter()
+            .map(|(path, item)| (format!("{base_path}{path}"), item))
+            .collect();
+        doc.paths.paths = prefixed;
     }
     doc
 }
