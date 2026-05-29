@@ -25,7 +25,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::broadcast;
 
 use crate::metrics_source::SubsystemMetrics;
-use crate::stats::{Metrics, stats_loop};
+use crate::stats::{Metrics, ValidityCriteria, stats_loop};
 
 #[tokio::main]
 async fn main() {
@@ -51,7 +51,12 @@ async fn run(cli: CliArgs) -> Result<()> {
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     spawn_signal_handler(shutdown_tx.clone());
 
-    let metrics = Metrics::new(network_id, CliArgs::version(), cli.crawler.stale_good);
+    let validity = ValidityCriteria {
+        min_protocol_version: cli.dns.min_protocol_version,
+        min_user_agent: cli.dns.min_user_agent.clone(),
+        strict_default_port: cli.crawler.strict_port.then_some(network_id.default_p2p_port()),
+    };
+    let metrics = Metrics::new(network_id, CliArgs::version(), cli.crawler.stale_good, validity);
     metrics.load_from(&store);
 
     let probe_cfg = ProbeInitializerConfig::new(network_id, cli.crawler.probe_timeout, cli.crawler.probes_per_peer);

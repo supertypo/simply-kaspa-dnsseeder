@@ -7,7 +7,7 @@ use simply_kaspa_dnsseeder_crawler::CrawlerSnapshot;
 use simply_kaspa_dnsseeder_dns::DnsSnapshot;
 use simply_kaspa_dnsseeder_web::WebSnapshot;
 
-use super::format::{age, count, uptime};
+use super::format::{count, uptime};
 
 const RULE_TOP: &str = "=========================================================================================================";
 const RULE_MID: &str = "  ---------------------------------------------------------------------------------------------------";
@@ -17,11 +17,11 @@ pub(super) struct Block {
     pub network: NetworkId,
     pub version: &'static str,
     pub summary_good: u64,
+    pub summary_filtered: u64,
     pub summary_stale: u64,
     pub summary_failed: u64,
     pub summary_v4: u64,
     pub summary_v6: u64,
-    pub avg_age: Duration,
     pub crawler: CrawlerSnapshot,
     pub dns: DnsSnapshot,
     pub web: WebSnapshot,
@@ -44,19 +44,19 @@ pub(super) fn render(b: &Block) -> Vec<String> {
         "peers",
         "good",
         &count(b.summary_good),
+        "filtered",
+        &count(b.summary_filtered),
         "stale",
         &count(b.summary_stale),
-        "failed",
-        &count(b.summary_failed),
     ));
     out.push(row(
         "",
-        "v4",
+        "ipv4",
         &count(b.summary_v4),
-        "v6",
+        "ipv6",
         &count(b.summary_v6),
-        "avg-age",
-        &age(b.avg_age),
+        "failed",
+        &count(b.summary_failed),
     ));
     out.push(RULE_MID.to_string());
     out.push(row(

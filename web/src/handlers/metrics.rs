@@ -9,6 +9,7 @@ use log::warn;
 use serde_json::json;
 
 use simply_kaspa_dnsseeder_common::{duration_to_ms, now_ms};
+use simply_kaspa_dnsseeder_store::Filter;
 
 use crate::state::AppState;
 use crate::system::{collect_disk, collect_process};
@@ -17,7 +18,20 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
     state.obs.metrics.record_request();
     let now = now_ms();
     let stale_good_ms = duration_to_ms(state.config.stale_good);
-    let summary = match state.runtime.store.blocking(move |s| s.summary(now, stale_good_ms)).await {
+    let validity = Filter::serving(
+        now,
+        stale_good_ms,
+        state.config.min_protocol_version,
+        state.config.min_user_agent.clone(),
+        None,
+        state.config.strict_port.then_some(state.config.network_default_port),
+    );
+    let summary = match state
+        .runtime
+        .store
+        .blocking(move |s| s.summary(now, stale_good_ms, Some(&validity)))
+        .await
+    {
         Ok(s) => s,
         Err(err) => {
             warn!("web: GET /metrics store error: {err}");
@@ -70,6 +84,7 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
         "peers": {
             "total": summary.total,
             "good": summary.good,
+            "filtered": summary.filtered,
             "stale": summary.stale,
             "failed": summary.failed,
             "stub": summary.stub,

@@ -12,10 +12,11 @@ use std::time::{Duration, Instant};
 
 use kaspa_consensus_core::network::NetworkId;
 use log::{debug, info, warn};
+use semver::Version;
 use simply_kaspa_dnsseeder_common::now_ms;
 use simply_kaspa_dnsseeder_crawler::CrawlerMetrics;
 use simply_kaspa_dnsseeder_dns::DnsMetrics;
-use simply_kaspa_dnsseeder_store::PeerStore;
+use simply_kaspa_dnsseeder_store::{Filter, PeerStore};
 use simply_kaspa_dnsseeder_web::WebMetrics;
 use tokio::sync::broadcast;
 
@@ -33,6 +34,16 @@ impl MetricsReport {
     }
 }
 
+/// Per-process knobs that turn a "good" peer into a "good and valid" one (i.e. one that the DNS /
+/// API surface would actually serve). Mirrors the relevant fields of `DnsConfig` / `WebConfig`.
+#[derive(Clone, Default)]
+pub struct ValidityCriteria {
+    pub min_protocol_version: Option<u32>,
+    pub min_user_agent: Option<Version>,
+    /// `Some(port)` when `--strict-port` is set; `None` otherwise.
+    pub strict_default_port: Option<u16>,
+}
+
 pub struct Metrics {
     pub crawler: Arc<CrawlerMetrics>,
     pub dns: Arc<DnsMetrics>,
@@ -41,11 +52,12 @@ pub struct Metrics {
     network: NetworkId,
     version: &'static str,
     stale_good: Duration,
+    validity: ValidityCriteria,
 }
 
 impl Metrics {
     #[must_use]
-    pub fn new(network: NetworkId, version: &'static str, stale_good: Duration) -> Arc<Self> {
+    pub fn new(network: NetworkId, version: &'static str, stale_good: Duration, validity: ValidityCriteria) -> Arc<Self> {
         Arc::new(Self {
             crawler: Arc::new(CrawlerMetrics::new()),
             dns: Arc::new(DnsMetrics::new()),
@@ -54,6 +66,7 @@ impl Metrics {
             network,
             version,
             stale_good,
+            validity,
         })
     }
 
@@ -66,7 +79,15 @@ impl Metrics {
     fn snapshot(&self, store: &PeerStore) -> Option<MetricsReport> {
         let now = now_ms();
         let stale_good_ms = i64::try_from(self.stale_good.as_millis()).unwrap_or(i64::MAX);
-        let summary = match store.summary(now, stale_good_ms) {
+        let validity = Filter::serving(
+            now,
+            stale_good_ms,
+            self.validity.min_protocol_version,
+            self.validity.min_user_agent.clone(),
+            None,
+            self.validity.strict_default_port,
+        );
+        let summary = match store.summary(now, stale_good_ms, Some(&validity)) {
             Ok(s) => s,
             Err(err) => {
                 warn!("stats: store summary failed: {err}");
@@ -78,11 +99,11 @@ impl Metrics {
             network: self.network,
             version: self.version,
             summary_good: summary.good,
+            summary_filtered: summary.filtered,
             summary_stale: summary.stale,
             summary_failed: summary.failed,
             summary_v4: summary.v4,
             summary_v6: summary.v6,
-            avg_age: Duration::from_millis(summary.avg_success_age_ms),
             crawler: self.crawler.snapshot(),
             dns: self.dns.snapshot(),
             web: self.web.snapshot(),

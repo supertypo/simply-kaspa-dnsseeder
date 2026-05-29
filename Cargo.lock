@@ -3279,6 +3279,7 @@ dependencies = [
  "env_logger",
  "kaspa-consensus-core",
  "log",
+ "semver",
  "serde",
  "serde_json",
  "simply-kaspa-dnsseeder-cli",

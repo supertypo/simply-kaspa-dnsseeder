@@ -20,18 +20,26 @@ const KV: TableDefinition<&str, &[u8]> = TableDefinition::new("kv_v1");
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StoreSummary {
     pub total: u64,
+    /// Peers within the stale-good window that also pass the supplied `validity` filter
+    /// (i.e. would actually be served by the DNS / API surface). When no validity filter is
+    /// passed, this is just "good by stale-good". Sum `good + filtered` for the raw count.
     pub good: u64,
+    /// Peers within the stale-good window that fail the supplied `validity` filter.
+    /// Zero when no validity filter is passed.
+    pub filtered: u64,
     /// Peers that previously succeeded but whose `last_success_ms` is older than `stale_good_ms`.
     pub stale: u64,
-    /// Peers that have never succeeded (`last_success_ms <= 0`).
+    /// Peers that have been attempted but never succeeded (`last_attempt_ms > 0 && last_success_ms <= 0`).
+    /// Stubs (never-attempted records) are tracked separately in `stub`.
     pub failed: u64,
-    /// Subset of `failed` that have also never been attempted (`last_attempt_ms <= 0`).
+    /// Discovery-only records that have never been probed (`last_attempt_ms <= 0 && last_success_ms <= 0`).
     pub stub: u64,
-    /// Count of good IPv4 peers (subset of `good`).
+    /// Count of IPv4 peers within the stale-good window (counts the raw `good + filtered` subset).
     pub v4: u64,
-    /// Count of good IPv6 peers (subset of `good`).
+    /// Count of IPv6 peers within the stale-good window (counts the raw `good + filtered` subset).
     pub v6: u64,
-    /// Average age in ms of `last_success_ms` across the `good` subset. Zero when `good == 0`.
+    /// Average age in ms of `last_success_ms` across the raw `good + filtered` subset.
+    /// Zero when there are no peers in that subset.
     pub avg_success_age_ms: u64,
 }
 
@@ -395,12 +403,16 @@ impl PeerStore {
     }
 
     /// Compute an aggregate summary of all stored peers in a single read pass.
-    /// A peer is "good" iff `last_success_ms > 0` and `now_ms - last_success_ms <= stale_good_ms`,
-    /// "stale" iff it has succeeded before but aged past that window, and "failed" iff it has never succeeded.
-    /// `v4` / `v6` count only the "good" subset.
-    pub fn summary(&self, now_ms: i64, stale_good_ms: i64) -> Result<StoreSummary, Error> {
+    /// A peer is in the "good" class iff `last_success_ms > 0` and `now_ms - last_success_ms <= stale_good_ms`.
+    /// That class is then split by the supplied `validity` filter into `good` (passes) and `filtered`
+    /// (fails); when `validity` is `None`, every good peer counts as `good`. The filter's stale-good
+    /// and family fields are ignored — staleness is handled here and the v4/v6 split is reported
+    /// separately. `stale` = succeeded before but past the window; `failed` = attempted but never
+    /// succeeded; `stub` = never attempted. `v4`/`v6` count the raw `good + filtered` subset.
+    pub fn summary(&self, now_ms: i64, stale_good_ms: i64, validity: Option<&Filter>) -> Result<StoreSummary, Error> {
         let mut s = StoreSummary::default();
         let mut sum_age_ms: u128 = 0;
+        let mut raw_good: u64 = 0;
         let txn = self.db.begin_read()?;
         let t = txn.open_table(PEERS)?;
         for entry in t.iter()? {
@@ -408,15 +420,16 @@ impl PeerStore {
             let Ok(rec) = decode_record(v.value()) else { continue };
             s.total += 1;
             if rec.last_success_ms <= 0 {
-                s.failed += 1;
                 if rec.last_attempt_ms <= 0 {
                     s.stub += 1;
+                } else {
+                    s.failed += 1;
                 }
                 continue;
             }
             let age = now_ms.saturating_sub(rec.last_success_ms);
             if age <= stale_good_ms {
-                s.good += 1;
+                raw_good += 1;
                 match rec.address.ip {
                     IpAddr::V4(_) => s.v4 += 1,
                     IpAddr::V6(_) => s.v6 += 1,
@@ -424,12 +437,18 @@ impl PeerStore {
                 if age > 0 {
                     sum_age_ms += u128::from(u64::try_from(age).unwrap_or(0));
                 }
+                let passes = validity.is_none_or(|f| validity_matches(f, &rec));
+                if passes {
+                    s.good += 1;
+                } else {
+                    s.filtered += 1;
+                }
             } else {
                 s.stale += 1;
             }
         }
-        if s.good > 0 {
-            s.avg_success_age_ms = u64::try_from(sum_age_ms / u128::from(s.good)).unwrap_or(u64::MAX);
+        if raw_good > 0 {
+            s.avg_success_age_ms = u64::try_from(sum_age_ms / u128::from(raw_good)).unwrap_or(u64::MAX);
         }
         Ok(s)
     }
@@ -482,4 +501,27 @@ pub fn is_eligible_for_probe(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, 
 
 fn is_incompatible_db(err: &redb::DatabaseError) -> bool {
     matches!(err, redb::DatabaseError::UpgradeRequired(_) | redb::DatabaseError::RepairAborted)
+}
+
+/// Re-runs the DNS/API serving filter against `rec` but ignores the filter's stale-good and
+/// family fields — the caller of [`PeerStore::summary`] handles staleness via `stale_good_ms`,
+/// and the v4/v6 split is reported separately.
+fn validity_matches(filter: &Filter, rec: &PeerRecord) -> bool {
+    if let Some(min) = filter.min_protocol_version
+        && rec.protocol_version < min
+    {
+        return false;
+    }
+    if let Some(min) = filter.min_user_agent.as_ref() {
+        match PeerRecord::parse_kaspad_version(&rec.user_agent) {
+            Some(v) if (v.major, v.minor, v.patch) >= (min.major, min.minor, min.patch) => {}
+            _ => return false,
+        }
+    }
+    if let Some(port) = filter.default_port
+        && rec.address.port != port
+    {
+        return false;
+    }
+    true
 }

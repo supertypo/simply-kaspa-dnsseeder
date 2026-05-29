@@ -30,20 +30,3 @@ pub(super) fn uptime(d: Duration) -> String {
         format!("{minutes}m {seconds:02}s")
     }
 }
-
-pub(super) fn age(d: Duration) -> String {
-    let secs = d.as_secs();
-    if secs == 0 {
-        return "-".to_string();
-    }
-    let hours = secs / 3600;
-    let minutes = (secs % 3600) / 60;
-    let seconds = secs % 60;
-    if hours > 0 {
-        format!("{hours}h {minutes:02}m")
-    } else if minutes > 0 {
-        format!("{minutes}m {seconds:02}s")
-    } else {
-        format!("{seconds}s")
-    }
-}

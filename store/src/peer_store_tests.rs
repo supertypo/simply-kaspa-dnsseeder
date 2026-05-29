@@ -221,13 +221,41 @@ fn summary_v4_v6_counts_only_good_subset() {
         store.upsert(r).unwrap();
     }
     // stale_good = 200 → success_ms in (now-200 ..= now) is "good".
-    let s = store.summary(600, 200).unwrap();
+    let s = store.summary(600, 200, None).unwrap();
     assert_eq!(s.total, 5);
-    assert_eq!(s.good, 3, "good = 2 v4 + 1 v6 within window");
+    assert_eq!(s.good, 3, "good = 2 v4 + 1 v6 within window (no validity filter)");
+    assert_eq!(s.filtered, 0);
     assert_eq!(s.v4, 2, "v4 counts only good subset");
     assert_eq!(s.v6, 1, "v6 counts only good subset");
     assert_eq!(s.stale, 1, "r3 succeeded before but is past stale_good window");
-    assert_eq!(s.failed, 1, "r4 never succeeded");
+    assert_eq!(s.failed, 1, "r4 attempted but never succeeded");
+    assert_eq!(s.stub, 0);
+}
+
+#[test]
+fn summary_splits_good_into_valid_and_filtered_with_min_user_agent() {
+    let (_dir, store) = open_temp_store();
+    // Two good v4 peers, different user-agents.
+    let mut new_peer = make_rec(1, Ipv4Addr::new(10, 0, 0, 1), 16111, 500);
+    new_peer.last_success_ms = 500;
+    new_peer.user_agent = "/kaspad:1.2.3/".into();
+    let mut old_peer = make_rec(2, Ipv4Addr::new(10, 0, 0, 2), 16111, 500);
+    old_peer.last_success_ms = 500;
+    old_peer.user_agent = "/kaspad:1.0.0/".into();
+    // Stub (never attempted, never succeeded) \u2014 must not show up in `failed`.
+    let mut stub = make_rec(3, Ipv4Addr::new(10, 0, 0, 3), 16111, 500);
+    stub.last_attempt_ms = 0;
+    stub.last_success_ms = 0;
+    for r in [&new_peer, &old_peer, &stub] {
+        store.upsert(r).unwrap();
+    }
+    let validity = Filter::serving(600, 200, None, Some(semver::Version::new(1, 2, 0)), None, None);
+    let s = store.summary(600, 200, Some(&validity)).unwrap();
+    assert_eq!(s.good, 1, "only new_peer (1.2.3) passes min_user_agent 1.2.0");
+    assert_eq!(s.filtered, 1, "old_peer (1.0.0) is good but filtered out");
+    assert_eq!(s.v4, 2, "v4 counts the raw good+filtered subset");
+    assert_eq!(s.stub, 1);
+    assert_eq!(s.failed, 0, "stubs do not count as failed");
 }
 
 #[test]
