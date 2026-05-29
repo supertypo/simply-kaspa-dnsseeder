@@ -14,6 +14,8 @@ pub enum ProbeError {
     Connection(String),
     #[error("handshake error: {0}")]
     Handshake(String),
+    #[error("network mismatch: local {local}, remote {remote}")]
+    NetworkMismatch { local: String, remote: String },
     #[error("addresses exchange error: {0}")]
     Addresses(String),
     #[error("timed out")]

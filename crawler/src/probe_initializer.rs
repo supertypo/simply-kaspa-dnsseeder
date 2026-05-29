@@ -77,6 +77,10 @@ impl ProbeInitializer {
         let timeout = self.config.probe_timeout;
 
         let peer_version: VersionMessage = dequeue_with_timeout!(version_route, Payload::Version, timeout)?;
+        let local_network = self.config.network_id.to_prefixed();
+        if peer_version.network != local_network {
+            return Err(ProtocolError::WrongNetwork(local_network, peer_version.network));
+        }
         debug!(
             "crawler: probe {}: peer version protocol={} ua={:?} network={}",
             router.net_address(),
@@ -101,7 +105,7 @@ impl ProbeInitializer {
             user_agent: USER_AGENT.to_string(),
             disable_relay_tx: true,
             subnetwork_id: None,
-            network: self.config.network_id.to_prefixed(),
+            network: local_network,
         };
         router.enqueue(make_message!(Payload::Version, our_version)).await?;
 
@@ -229,6 +233,9 @@ impl ConnectionInitializer for ProbeInitializer {
                 if let Some(tx) = sender {
                     let probe_err = match &err {
                         ProtocolError::Timeout(_) => ProbeError::Timeout,
+                        ProtocolError::WrongNetwork(local, remote) => {
+                            ProbeError::NetworkMismatch { local: local.clone(), remote: remote.clone() }
+                        }
                         other => ProbeError::Handshake(other.to_string()),
                     };
                     let _ = tx.send(Err(probe_err));
