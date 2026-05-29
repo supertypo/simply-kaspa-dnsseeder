@@ -192,6 +192,11 @@ impl PeerStore {
     /// exists; otherwise only refreshes `last_attempt_ms`. Uses
     /// `Durability::None` — losing the latest attempt on crash only
     /// causes a slightly-early re-probe, far cheaper than fsync per probe.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `set_durability` is called after a table has been opened in the
+    /// transaction; this would indicate a programmer error in this method.
     pub fn record_attempt(&self, addr: &NetAddress, now_ms: i64) -> Result<PeerRecord, Error> {
         let key = encode_key(addr)?;
         let mut txn = self.db.begin_write()?;

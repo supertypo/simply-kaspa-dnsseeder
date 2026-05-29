@@ -381,7 +381,7 @@ async fn rate_limit_drops_silently() {
     let (server, _cfg, shutdown, handle) = start_server_with(
         |c| {
             c.queries_per_ip_per_second = 1;
-            c.rate_limit_window = Duration::from_secs(60);
+            c.rate_limit_window = Duration::from_mins(1);
         },
         store,
     )

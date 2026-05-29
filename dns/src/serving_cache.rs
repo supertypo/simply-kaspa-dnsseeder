@@ -95,7 +95,7 @@ fn pick_freshest(store: &PeerStore, config: &DnsConfig, p2p_port: u16, family: F
             return Box::new([]);
         }
     };
-    peers.sort_unstable_by(|a, b| b.last_success_ms.cmp(&a.last_success_ms));
+    peers.sort_unstable_by_key(|p| std::cmp::Reverse(p.last_success_ms));
     peers.truncate(cap);
     peers.into_iter().map(|p| p.address.ip).collect::<Vec<IpAddr>>().into_boxed_slice()
 }

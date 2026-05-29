@@ -68,9 +68,9 @@ fn humantime_durations_parse() {
         "30d",
     ]);
     assert_eq!(cli.crawler.probe_tick, Duration::from_secs(5));
-    assert_eq!(cli.crawler.stale_good, Duration::from_secs(90 * 60));
-    assert_eq!(cli.crawler.stale_bad, Duration::from_secs(4 * 60 * 60));
-    assert_eq!(cli.crawler.dead_after, Duration::from_secs(30 * 24 * 60 * 60));
+    assert_eq!(cli.crawler.stale_good, Duration::from_mins(90));
+    assert_eq!(cli.crawler.stale_bad, Duration::from_hours(4));
+    assert_eq!(cli.crawler.dead_after, Duration::from_hours(720));
 }
 
 #[test]

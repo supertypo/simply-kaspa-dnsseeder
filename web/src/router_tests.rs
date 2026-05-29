@@ -51,12 +51,12 @@ fn make_state(prober: Arc<dyn Prober>, store: PeerStore, api_key: Option<String>
         api_key,
         allowed_origins: Vec::new(),
         post_rate_limit: 5,
-        rate_limit_window: Duration::from_secs(60),
+        rate_limit_window: Duration::from_mins(1),
         network_default_port: 16111,
         strict_port: false,
         api_prefix: String::new(),
         db_path: std::path::PathBuf::from("_test_unused.redb"),
-        stale_good: Duration::from_secs(900),
+        stale_good: Duration::from_mins(15),
         min_protocol_version: None,
         min_user_agent: None,
         service_name: "test",
@@ -76,8 +76,7 @@ fn seeded_store() -> (TempDir, PeerStore) {
     let now = i64::try_from(
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0),
+            .map_or(0, |d| d.as_millis()),
     )
     .unwrap_or(0);
     store
@@ -260,12 +259,12 @@ async fn rate_limit_blocks_repeated_posts() {
         api_key: None,
         allowed_origins: Vec::new(),
         post_rate_limit: 1,
-        rate_limit_window: Duration::from_secs(60),
+        rate_limit_window: Duration::from_mins(1),
         network_default_port: 16111,
         strict_port: false,
         api_prefix: String::new(),
         db_path: std::path::PathBuf::from("_test_unused.redb"),
-        stale_good: Duration::from_secs(900),
+        stale_good: Duration::from_mins(15),
         min_protocol_version: None,
         min_user_agent: None,
         service_name: "test",
@@ -372,12 +371,12 @@ async fn list_peers_applies_protocol_version_filter_unless_all() {
         api_key: None,
         allowed_origins: Vec::new(),
         post_rate_limit: 5,
-        rate_limit_window: Duration::from_secs(60),
+        rate_limit_window: Duration::from_mins(1),
         network_default_port: 16111,
         strict_port: false,
         api_prefix: String::new(),
         db_path: std::path::PathBuf::from("_test_unused.redb"),
-        stale_good: Duration::from_secs(900),
+        stale_good: Duration::from_mins(15),
         min_protocol_version: Some(10),
         min_user_agent: None,
         service_name: "test",
