@@ -11,7 +11,7 @@ use kaspa_p2p_lib::pb::{
 };
 use kaspa_p2p_lib::{ConnectionInitializer, IncomingRoute, KaspadMessagePayloadType, Router, dequeue_with_timeout, make_message};
 use kaspa_utils::networking::{IpAddress, PeerId};
-use log::{debug, info, trace, warn};
+use log::{debug, trace, warn};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -123,11 +123,6 @@ impl ProbeInitializer {
             .await?;
 
         let address_list = self.collect_addresses(router, &mut addresses_route, timeout).await?;
-        info!(
-            "crawler: probe {}: received {} address(es)",
-            router.net_address(),
-            address_list.len()
-        );
         trace!("crawler: probe {}: addresses = {:?}", router.net_address(), address_list);
 
         // Pre-empt the peer's 120s PingFlow timeout; `DUPLICATE_CONNECTION` is mapped to `IgnorableReject` on the remote.

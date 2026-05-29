@@ -8,7 +8,7 @@
 use std::net::SocketAddr;
 
 use kaspa_utils::networking::IpAddress;
-use log::{debug, warn};
+use log::{debug, info, warn};
 use simply_kaspa_dnsseeder_common::{canonicalize_ip, now_ms};
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 
@@ -38,11 +38,13 @@ pub(crate) async fn probe_one(
             if let Err(err) = apply_success(store, addr, &result).await {
                 warn!("crawler: failed to persist successful probe of {addr}: {err}");
             }
+            let agent_label = match PeerRecord::parse_kaspad_version(&result.version.user_agent) {
+                Some(v) => format!("kaspad:{v}"),
+                None => format!("{:?}", result.version.user_agent),
+            };
             let discovered = result.addresses.len();
             let new_stubs = insert_discovered_stubs(store, result.addresses, default_port, strict_port).await;
-            if discovered > 0 {
-                debug!("crawler: {addr} advertised {discovered} address(es), {new_stubs} new");
-            }
+            info!("crawler: probe {addr} ({agent_label}): received {discovered} address(es), {new_stubs} new");
         }
         Err(err) => {
             if let Some(m) = metrics {
