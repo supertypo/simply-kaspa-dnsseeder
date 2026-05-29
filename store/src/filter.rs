@@ -78,7 +78,7 @@ impl Filter {
         }
         if let Some(min) = self.min_user_agent.as_ref() {
             match PeerRecord::parse_kaspad_version(&rec.user_agent) {
-                Some(v) if &v >= min => {}
+                Some(v) if (v.major, v.minor, v.patch) >= (min.major, min.minor, min.patch) => {}
                 _ => return false,
             }
         }

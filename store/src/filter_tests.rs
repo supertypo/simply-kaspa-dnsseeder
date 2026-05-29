@@ -149,6 +149,26 @@ fn min_user_agent_filter() {
 }
 
 #[test]
+fn min_user_agent_ignores_prerelease_suffix() {
+    let now = 1_000_000;
+    // Real-world example: kaspad publishes prerelease tags like `1.2.1-toc.3`.
+    let r = rec(now, "/kaspad:1.2.1-toc.3/kaspad:1.2.1-toc.3/", 16111, false, 7);
+    let f = Filter {
+        now_ms: now,
+        dead_after_ms: 1_000_000_000,
+        stale_good_ms: None,
+        family: None,
+        min_protocol_version: None,
+        min_user_agent: Some(Version::new(1, 2, 1)),
+        default_port: None,
+    };
+    // Strict semver would reject `1.2.1-toc.3 < 1.2.1`; we want major.minor.patch only.
+    assert!(f.matches(&r));
+    let f_too_high = Filter { min_user_agent: Some(Version::new(1, 2, 2)), ..f };
+    assert!(!f_too_high.matches(&r));
+}
+
+#[test]
 fn default_port_only_filter() {
     let now = 1_000_000;
     let r = rec(now, "/kaspad:1.0.0/", 16112, false, 7);
