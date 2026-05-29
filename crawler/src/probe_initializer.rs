@@ -233,9 +233,10 @@ impl ConnectionInitializer for ProbeInitializer {
                 if let Some(tx) = sender {
                     let probe_err = match &err {
                         ProtocolError::Timeout(_) => ProbeError::Timeout,
-                        ProtocolError::WrongNetwork(local, remote) => {
-                            ProbeError::NetworkMismatch { local: local.clone(), remote: remote.clone() }
-                        }
+                        ProtocolError::WrongNetwork(local, remote) => ProbeError::NetworkMismatch {
+                            local: local.clone(),
+                            remote: remote.clone(),
+                        },
                         other => ProbeError::Handshake(other.to_string()),
                     };
                     let _ = tx.send(Err(probe_err));

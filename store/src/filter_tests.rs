@@ -173,7 +173,10 @@ fn min_user_agent_ignores_prerelease_suffix() {
     };
     // Strict semver would reject `1.2.1-toc.3 < 1.2.1`; we want major.minor.patch only.
     assert!(f.matches(&r));
-    let f_too_high = Filter { min_user_agent: Some(Version::new(1, 2, 2)), ..f };
+    let f_too_high = Filter {
+        min_user_agent: Some(Version::new(1, 2, 2)),
+        ..f
+    };
     assert!(!f_too_high.matches(&r));
 }
 
