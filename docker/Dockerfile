@@ -12,7 +12,8 @@ RUN apk --no-cache add \
   linux-headers \
   git \
   protoc \
-  protobuf-dev
+  protobuf-dev \
+  curl
 
 WORKDIR /work
 
@@ -32,9 +33,9 @@ RUN mkdir -p cli/src common/src store/src crawler/src dns/src web/src dnsseeder/
     echo "fn main() {}" > cli/build.rs && \
     echo "pub fn placeholder() {}" > cli/src/lib.rs && \
     echo "pub fn placeholder() {}" > common/src/lib.rs && \
-    echo "pub fn placeholder() {}" > store/src/lib.rs && \
     echo "pub fn placeholder() {}" > crawler/src/lib.rs && \
     echo "pub fn placeholder() {}" > dns/src/lib.rs && \
+    echo "pub fn placeholder() {}" > store/src/lib.rs && \
     echo "pub fn placeholder() {}" > web/src/lib.rs && \
     echo "fn main() {}" > dnsseeder/src/main.rs
 
