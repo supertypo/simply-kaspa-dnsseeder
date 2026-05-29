@@ -37,7 +37,7 @@ impl CrawlerMetrics {
 
     pub fn record_failed_kind(&self, err: &ProbeError) {
         let counter = match err {
-            ProbeError::Connection(_) => &self.failed_connect,
+            ProbeError::Connection(_) | ProbeError::Store(_) => &self.failed_connect,
             ProbeError::Handshake(_) | ProbeError::NetworkMismatch { .. } => &self.failed_handshake,
             ProbeError::Addresses(_) => &self.failed_addresses,
             ProbeError::Timeout => &self.failed_timeout,

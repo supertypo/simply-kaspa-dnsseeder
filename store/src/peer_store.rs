@@ -455,17 +455,16 @@ impl PeerStore {
 }
 
 fn encode_record(rec: &PeerRecord) -> Result<Vec<u8>, Error> {
-    bincode::serde::encode_to_vec(rec, bincode::config::standard()).map_err(|e| Error::Encode(e.to_string()))
+    Ok(bincode::serde::encode_to_vec(rec, bincode::config::standard())?)
 }
 
 fn decode_record(bytes: &[u8]) -> Result<PeerRecord, Error> {
-    bincode::serde::decode_from_slice(bytes, bincode::config::standard())
-        .map(|(v, _)| v)
-        .map_err(|e| Error::Decode(e.to_string()))
+    let (v, _) = bincode::serde::decode_from_slice(bytes, bincode::config::standard())?;
+    Ok(v)
 }
 
 fn encode_key(addr: &NetAddress) -> Result<Vec<u8>, Error> {
-    bincode::serde::encode_to_vec(addr, bincode::config::standard()).map_err(|e| Error::Encode(e.to_string()))
+    Ok(bincode::serde::encode_to_vec(addr, bincode::config::standard())?)
 }
 
 /// Eligibility predicate used by [`PeerStore::due_for_probe`]. Exposed for

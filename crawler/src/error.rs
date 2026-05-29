@@ -12,6 +12,8 @@ pub enum Error {
 pub enum ProbeError {
     #[error("connection error: {0}")]
     Connection(String),
+    #[error("store error: {0}")]
+    Store(#[from] simply_kaspa_dnsseeder_store::Error),
     #[error("handshake error: {0}")]
     Handshake(String),
     #[error("network mismatch: local {local}, remote {remote}")]

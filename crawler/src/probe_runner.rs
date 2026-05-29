@@ -60,9 +60,7 @@ pub(crate) async fn probe_one(
 /// submissions through the same code path as scheduled probes.
 pub async fn probe_and_store(probe: &dyn Probe, store: &PeerStore, addr: SocketAddr) -> Result<PeerRecord, ProbeError> {
     match probe.probe(addr).await {
-        Ok(result) => apply_success(store, addr, &result)
-            .await
-            .map_err(|e| ProbeError::Connection(e.to_string())),
+        Ok(result) => Ok(apply_success(store, addr, &result).await?),
         Err(err) => {
             let net = net_from(addr);
             let now = now_ms();

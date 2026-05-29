@@ -19,9 +19,9 @@ pub enum Error {
     #[error("io error: {0}")]
     Io(Box<std::io::Error>),
     #[error("encode error: {0}")]
-    Encode(String),
+    Encode(#[from] bincode::error::EncodeError),
     #[error("decode error: {0}")]
-    Decode(String),
+    Decode(#[from] bincode::error::DecodeError),
 }
 
 impl From<redb::Error> for Error {

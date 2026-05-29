@@ -48,7 +48,7 @@ fn stale_buckets_are_evicted() {
     }
     let populated = rl.tracked_ips();
     std::thread::sleep(Duration::from_millis(30));
-    rl.force_sweep();
+    rl.__force_sweep_for_tests();
     assert!(
         rl.tracked_ips() < populated,
         "expected eviction from {populated}, still have {}",

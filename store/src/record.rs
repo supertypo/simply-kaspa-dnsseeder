@@ -6,6 +6,7 @@ pub type PeerId = [u8; 16];
 
 /// IP + port pair, in native types for compact storage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NetAddress {
     pub ip: IpAddr,
     pub port: u16,
@@ -14,6 +15,7 @@ pub struct NetAddress {
 /// Persisted peer record keyed by `NetAddress`. Timestamps are unix ms;
 /// `subnetwork_id` is the raw 20-byte kaspa subnetwork identifier when set.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PeerRecord {
     // Network identity.
     pub address: NetAddress,

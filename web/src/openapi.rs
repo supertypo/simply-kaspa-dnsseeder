@@ -4,9 +4,9 @@ use utoipa::OpenApi;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 
 use crate::dto::{
-    CrawlerSubsystem, DiskInfo, DnsRateLimiterSubsystem, DnsSubsystem, FullPeerDto, HealthResponse, MetricsResponse, PeerCounts,
-    PeerDto, PeerFamilyCounts, PeerStatusCounts, PostRejected, ProcessInfo, PublicPeerDto, RateLimiterSubsystem, ServiceInfo,
-    ServingCacheSubsystem, SubmitPeerRequest, WebSubsystem,
+    ApiErrorBody, CrawlerSubsystem, DiskInfo, DnsRateLimiterSubsystem, DnsSubsystem, FullPeerDto, HealthResponse, MetricsResponse,
+    PeerCounts, PeerDto, PeerFamilyCounts, PeerStatusCounts, PostRejected, ProcessInfo, PublicPeerDto, RateLimiterSubsystem,
+    ServiceInfo, ServingCacheSubsystem, SubmitPeerRequest, WebSubsystem,
 };
 
 #[derive(OpenApi)]
@@ -23,6 +23,7 @@ use crate::dto::{
         crate::handlers::peers::submit,
     ),
     components(schemas(
+        ApiErrorBody,
         HealthResponse,
         MetricsResponse,
         ServiceInfo,

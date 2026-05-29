@@ -74,7 +74,7 @@ impl MetricsSource for SubsystemMetrics {
                 last_refresh_age_ms,
             };
             out.insert(
-                "serving_cache".to_string(),
+                "servingCache".to_string(),
                 serde_json::to_value(&serving_cache).expect("ServingCacheSubsystem is plain data"),
             );
         }

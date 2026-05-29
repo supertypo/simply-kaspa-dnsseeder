@@ -96,7 +96,7 @@ impl RateLimiter {
     }
 
     #[doc(hidden)]
-    pub fn force_sweep(&self) {
+    pub fn __force_sweep_for_tests(&self) {
         self.buckets.retain(|_, b| Instant::now() < b.refill_at);
     }
 }
