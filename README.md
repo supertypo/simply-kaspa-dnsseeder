@@ -31,7 +31,7 @@ simply-kaspa-dnsseeder \
   --dns-zone n-testnet-10.mydomain.org \
   --dns-nameserver ns-testnet-10.mydomain.org \
   --dns-listen 0.0.0.0:53 \
-  --http-listen 0.0.0.0:8080 \
+  --http-listen 0.0.0.0:5381 \
   --api-key "$(openssl rand -hex 32)"
 ```
 
