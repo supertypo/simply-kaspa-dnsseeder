@@ -311,6 +311,20 @@ fn due_for_probe_filters_bad_class_within_stale_bad_window() {
 }
 
 #[test]
+fn good_class_eligible_at_80_percent_of_stale_good() {
+    let (_dir, store) = open_temp_store();
+    let mut r = make_rec(1, Ipv4Addr::new(1, 1, 1, 1), 16111, 0);
+    r.last_attempt_ms = 0;
+    r.last_success_ms = 1; // good class
+    store.upsert(&r).unwrap();
+    // stale_good=100, threshold=80. since_attempt=79 → NOT eligible; 80 → eligible.
+    let just_before = store.due_for_probe(79, 100, 500, 0, 10).unwrap();
+    assert!(just_before.is_empty(), "good peer must not be re-probed before 80% of stale_good");
+    let at_threshold = store.due_for_probe(80, 100, 500, 0, 10).unwrap();
+    assert_eq!(at_threshold.len(), 1, "good peer must be eligible at 80% of stale_good");
+}
+
+#[test]
 fn record_attempt_updates_index_position() {
     let (_dir, store) = open_temp_store();
     let net = NetAddress {

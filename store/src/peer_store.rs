@@ -335,7 +335,7 @@ impl PeerStore {
             return Ok(Vec::new());
         }
         // Past this attempt time, no record (good or bad class) can be eligible.
-        let attempt_ceiling = now_ms.saturating_sub(stale_good_ms);
+        let attempt_ceiling = now_ms.saturating_sub(good_probe_threshold(stale_good_ms).min(stale_bad_ms));
         let mut out: Vec<PeerRecord> = Vec::with_capacity(max);
         let txn = self.db.begin_read()?;
         let idx = txn.open_multimap_table(ATTEMPT_IDX)?;
@@ -471,14 +471,26 @@ fn encode_key(addr: &NetAddress) -> Result<Vec<u8>, Error> {
 /// Eligibility predicate used by [`PeerStore::due_for_probe`]. Exposed for
 /// scheduler-side unit tests; production code reaches it through
 /// `due_for_probe` rather than calling it directly.
+///
+/// Good-class peers are eligible at 80% of the `stale_good` window so we
+/// re-probe them before they tip into the unservable bracket.
 #[must_use]
 pub fn is_eligible_for_probe(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, stale_bad_ms: i64, dead_cutoff_ms: i64) -> bool {
     if rec.last_seen_ms < dead_cutoff_ms && rec.first_seen_ms < dead_cutoff_ms {
         return false;
     }
     let since_attempt = now_ms.saturating_sub(rec.last_attempt_ms);
-    let threshold = if rec.last_success_ms > 0 { stale_good_ms } else { stale_bad_ms };
+    let threshold = if rec.last_success_ms > 0 {
+        good_probe_threshold(stale_good_ms)
+    } else {
+        stale_bad_ms
+    };
     since_attempt >= threshold
+}
+
+#[inline]
+fn good_probe_threshold(stale_good_ms: i64) -> i64 {
+    stale_good_ms * 4 / 5
 }
 
 fn is_incompatible_db(err: &redb::DatabaseError) -> bool {
