@@ -217,7 +217,7 @@ pub(crate) async fn submit(
         Err(err) => {
             state.obs.metrics.record_post_rejection(PostRejection::Probe);
             debug!("web: POST /peers probe of {addr} failed: {err}");
-            ApiError::BadGateway(format!("probe failed: {err}")).into_response()
+            ApiError::BadGateway("probe failed").into_response()
         }
     }
 }

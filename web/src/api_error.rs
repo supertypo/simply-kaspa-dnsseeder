@@ -10,7 +10,7 @@ pub(crate) enum ApiError {
     NotFound(&'static str),
     Unauthorized(&'static str),
     RateLimited(&'static str),
-    BadGateway(String),
+    BadGateway(&'static str),
     Internal(&'static str),
 }
 
@@ -28,8 +28,12 @@ impl ApiError {
 
     fn message(&self) -> &str {
         match self {
-            Self::BadRequest(m) | Self::NotFound(m) | Self::Unauthorized(m) | Self::RateLimited(m) | Self::Internal(m) => m,
-            Self::BadGateway(m) => m,
+            Self::BadRequest(m)
+            | Self::NotFound(m)
+            | Self::Unauthorized(m)
+            | Self::RateLimited(m)
+            | Self::BadGateway(m)
+            | Self::Internal(m) => m,
         }
     }
 }
