@@ -47,7 +47,7 @@ impl Prober for MockProber {
 
 fn make_state(prober: Arc<dyn Prober>, store: PeerStore, api_key: &str) -> AppState {
     let cfg = WebConfig {
-        listen: "127.0.0.1:0".parse().unwrap(),
+        listen: vec!["127.0.0.1:0".parse().unwrap()],
         api_key: api_key.to_string(),
         allowed_origins: Vec::new(),
         post_rate_limit: 5,
@@ -288,7 +288,7 @@ async fn rate_limit_blocks_repeated_posts() {
     let temp = TempDir::new().unwrap();
     let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
     let cfg = WebConfig {
-        listen: "127.0.0.1:0".parse().unwrap(),
+        listen: vec!["127.0.0.1:0".parse().unwrap()],
         api_key: "test-key".to_string(),
         allowed_origins: Vec::new(),
         post_rate_limit: 1,
@@ -413,7 +413,7 @@ async fn list_peers_applies_protocol_version_filter_unless_all() {
     // Seed peer protocol_version = 7; require >= 10 → default list should be empty,
     // ?all=true should still include it (freshness only).
     let cfg = WebConfig {
-        listen: "127.0.0.1:0".parse().unwrap(),
+        listen: vec!["127.0.0.1:0".parse().unwrap()],
         api_key: "test-key".to_string(),
         allowed_origins: Vec::new(),
         post_rate_limit: 5,

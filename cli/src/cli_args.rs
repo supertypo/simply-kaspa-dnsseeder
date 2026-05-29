@@ -113,9 +113,9 @@ pub struct DnsArgs {
 /// HTTP server options.
 #[derive(Args, Clone, Debug)]
 pub struct HttpArgs {
-    /// HTTP server bind address.
-    #[clap(long, default_value = "127.0.0.1:5380")]
-    pub http_listen: String,
+    /// HTTP server bind addresses (comma-separated). Defaults to dual-stack on all interfaces.
+    #[clap(long, default_value = "0.0.0.0:5380,[::]:5380", value_delimiter = ',', num_args = 1..)]
+    pub http_listen: Vec<SocketAddr>,
 
     /// URL prefix for all HTTP endpoints (e.g. `/api`). Use `""` to serve at the root.
     #[clap(long, default_value = "/api")]

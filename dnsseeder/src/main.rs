@@ -5,7 +5,6 @@
 mod metrics_source;
 mod stats;
 
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -116,11 +115,6 @@ async fn run(cli: CliArgs) -> Result<()> {
         None
     };
 
-    let http_listen: SocketAddr = cli
-        .http
-        .http_listen
-        .parse()
-        .with_context(|| format!("invalid --http-listen `{}`", cli.http.http_listen))?;
     let api_key = cli.http.api_key.clone().unwrap_or_else(|| {
         let key = generate_api_key();
         info!("web: --api-key not set; generated ephemeral key (rotates each restart)");
@@ -128,7 +122,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         key
     });
     let web_cfg = WebConfig {
-        listen: http_listen,
+        listen: cli.http.http_listen.clone(),
         api_key,
         allowed_origins: cli.http.allowed_origins.clone(),
         post_rate_limit: cli.http.post_rate_limit,

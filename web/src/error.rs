@@ -8,4 +8,6 @@ pub enum Error {
     Store(#[from] simply_kaspa_dnsseeder_store::Error),
     #[error("tls error: {0}")]
     Tls(std::io::Error),
+    #[error("no listen addresses configured")]
+    NoListenAddrs,
 }
