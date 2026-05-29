@@ -35,6 +35,10 @@ const PRUNE_INTERVAL: Duration = Duration::from_mins(1);
 /// Per-host timeout for `--seeder` lookups. Mirrors the built-in DNS-seeder
 /// timeout so a single dead host can't stall bootstrap indefinitely.
 const SEEDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
+/// Cadence at which the built-in DNS seeders are re-resolved so newly added
+/// entries percolate in without restarting the seeder. `--seeder` overrides
+/// are intentionally only used at bootstrap.
+const SEEDER_REFRESH_INTERVAL: Duration = Duration::from_mins(10);
 /// Cap on the bulk peer-close at shutdown so hung remotes can't keep the
 /// process alive past Docker's SIGTERM grace.
 const PROBE_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -123,6 +127,9 @@ impl Scheduler {
         let mut prune_ticker = tokio::time::interval(PRUNE_INTERVAL);
         prune_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         prune_ticker.tick().await;
+        let mut seeder_ticker = tokio::time::interval(SEEDER_REFRESH_INTERVAL);
+        seeder_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        seeder_ticker.tick().await;
 
         loop {
             tokio::select! {
@@ -141,6 +148,9 @@ impl Scheduler {
                 }
                 _ = prune_ticker.tick() => {
                     prune_once(&self.store, self.config.dead_after_ms(), self.config.dead_after).await;
+                }
+                _ = seeder_ticker.tick() => {
+                    self.refresh_builtin_seeders().await;
                 }
             }
         }
@@ -167,6 +177,17 @@ impl Scheduler {
             info!("crawler: bootstrap inserted {inserted} address stub(s)");
         }
         Ok(())
+    }
+
+    /// Periodic re-resolution of the built-in DNS seeders. Always uses
+    /// `Params::dns_seeders` regardless of whether `--seeder` was set at
+    /// startup — `--seeder` is intentionally one-shot.
+    async fn refresh_builtin_seeders(&self) {
+        let addrs = dns_seed_many(self.config.network_id, self.resolver.clone()).await;
+        let pulled = addrs.len();
+        let default_port = self.config.network_id.default_p2p_port();
+        let inserted = insert_bootstrap_stubs(&self.store, addrs, default_port, self.config.strict_port).await;
+        info!("crawler: refresh: pulled {pulled} built-in seeder address(es), {inserted} new");
     }
 
     async fn resolve_explicit_seeders(&self) -> Vec<SocketAddr> {
