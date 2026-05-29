@@ -66,6 +66,11 @@ Every log line starts with the *owning* subsystem (`crawler:`, `dns:`, `web:`, `
 ## Conventions
 
 - Edition 2024. `cargo clippy --workspace --all-targets -- -D warnings` must pass; CI mirrors this.
+- After every code change, before declaring the task done, run all three of:
+  - `cargo fmt --all`
+  - `cargo clippy --workspace --all-targets -- -D warnings`
+  - `cargo test --workspace`
+  Treat any warning as a failure. Don't skip these even for "trivial" edits — formatting and clippy drift add up fast.
 - Tests live in sibling `*_tests.rs` files (e.g. `peer_store.rs` ↔ `peer_store_tests.rs`), not inline `#[cfg(test)] mod tests`.
 - JSON over the HTTP API: always `serde(rename_all = "camelCase")`.
 - CLI durations: parsed with `humantime` (`--probe-tick 10s`, `--stale-good 30m`, `--stats-interval 1m`).
@@ -86,6 +91,7 @@ This file is the agent onboarding cheat sheet. When you change something that co
 
 ```bash
 cargo build                                              # build everything
+cargo fmt --all                                          # format (run before lint/test)
 cargo test --workspace                                   # run all tests
 cargo clippy --workspace --all-targets -- -D warnings    # lint gate
 cargo run -p simply-kaspa-dnsseeder -- --help            # see flags

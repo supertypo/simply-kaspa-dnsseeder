@@ -44,14 +44,7 @@ fn strict_port_flag_toggles() {
 fn dns_enabled_only_when_both_set() {
     let cli = parse(&["--network-id", "mainnet", "--dns-zone", "seed.test"]);
     assert!(!cli.dns_enabled());
-    let cli = parse(&[
-        "--network-id",
-        "mainnet",
-        "--dns-zone",
-        "seed.test",
-        "--dns-nameserver",
-        "ns.test",
-    ]);
+    let cli = parse(&["--network-id", "mainnet", "--dns-zone", "seed.test", "--dns-nameserver", "ns.test"]);
     assert!(cli.dns_enabled());
 }
 
