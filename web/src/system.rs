@@ -22,10 +22,10 @@ pub(crate) struct DiskInfo {
     pub db_size_bytes: u64,
     pub db_size_pretty: String,
     pub mount_point: String,
-    pub free_bytes: u64,
-    pub free_pretty: String,
     pub total_bytes: u64,
     pub total_pretty: String,
+    pub free_bytes: u64,
+    pub free_pretty: String,
 }
 
 pub(crate) async fn collect_process(system: &RwLock<System>) -> ProcessInfo {
@@ -77,9 +77,9 @@ pub(crate) fn collect_disk(db_path: &Path) -> DiskInfo {
         db_size_bytes,
         db_size_pretty: bytesize::ByteSize(db_size_bytes).to_string(),
         mount_point: mount,
-        free_bytes,
-        free_pretty: bytesize::ByteSize(free_bytes).to_string(),
         total_bytes,
         total_pretty: bytesize::ByteSize(total_bytes).to_string(),
+        free_bytes,
+        free_pretty: bytesize::ByteSize(free_bytes).to_string(),
     }
 }

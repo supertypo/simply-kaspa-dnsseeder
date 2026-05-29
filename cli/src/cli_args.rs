@@ -113,7 +113,7 @@ pub struct DnsArgs {
 #[derive(Args, Clone, Debug)]
 pub struct HttpArgs {
     /// HTTP server bind address.
-    #[clap(long, default_value = "127.0.0.1:8080")]
+    #[clap(long, default_value = "127.0.0.1:5380")]
     pub http_listen: String,
 
     /// URL prefix for all HTTP endpoints (e.g. `/api`). Use `""` to serve at the root.

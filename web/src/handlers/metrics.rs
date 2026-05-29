@@ -37,14 +37,24 @@ pub struct ServiceInfo {
 #[derive(Debug, Clone, Serialize)]
 pub struct PeerCounts {
     pub total: u64,
+    pub by_status: PeerStatusCounts,
+    pub by_family: PeerFamilyCounts,
+    pub avg_success_age_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerStatusCounts {
     pub good: u64,
     pub filtered: u64,
     pub stale: u64,
     pub failed: u64,
     pub stub: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerFamilyCounts {
     pub v4: u64,
     pub v6: u64,
-    pub avg_success_age_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -135,13 +145,17 @@ pub(crate) async fn handler(State(state): State<AppState>) -> Response {
         disk,
         peers: PeerCounts {
             total: summary.total,
-            good: summary.good,
-            filtered: summary.filtered,
-            stale: summary.stale,
-            failed: summary.failed,
-            stub: summary.stub,
-            v4: summary.v4,
-            v6: summary.v6,
+            by_status: PeerStatusCounts {
+                good: summary.good,
+                filtered: summary.filtered,
+                stale: summary.stale,
+                failed: summary.failed,
+                stub: summary.stub,
+            },
+            by_family: PeerFamilyCounts {
+                v4: summary.v4,
+                v6: summary.v6,
+            },
             avg_success_age_ms: summary.avg_success_age_ms,
         },
         subsystems,
