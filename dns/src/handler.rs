@@ -3,13 +3,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use hickory_proto::op::{Header, MessageType, OpCode, ResponseCode};
+use hickory_proto::op::{Header, HeaderCounts, MessageType, Metadata, OpCode, ResponseCode};
 use hickory_proto::rr::rdata::{A, AAAA, NS, SOA};
 use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
-use hickory_server::authority::MessageResponseBuilder;
 use hickory_server::server::{Request, RequestHandler, RequestInfo, ResponseHandler, ResponseInfo};
+use hickory_server::zone_handler::MessageResponseBuilder;
 use log::{debug, trace};
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use simply_kaspa_dnsseeder_common::RateLimiter;
 use simply_kaspa_dnsseeder_store::Family;
 
@@ -101,12 +101,12 @@ impl SeederHandler {
 
     /// Protocol-layer query validation. Records `refused` metrics on failure.
     fn parse_basic<'a>(&self, request: &'a Request) -> Result<RequestInfo<'a>, ()> {
-        if request.message_type() != MessageType::Query || request.op_code() != OpCode::Query {
+        if request.metadata.message_type != MessageType::Query || request.metadata.op_code != OpCode::Query {
             trace!(
                 "dns: rejecting non-query from {}: type={:?} op={:?}",
                 request.src(),
-                request.message_type(),
-                request.op_code()
+                request.metadata.message_type,
+                request.metadata.op_code
             );
             self.metrics.record_refused();
             return Err(());
@@ -161,11 +161,11 @@ impl SeederHandler {
             Family::V6 => &snap.v6,
         };
         let max = self.config.max_records;
-        let mut rng = rand::thread_rng();
-        pool.choose_multiple(&mut rng, max)
-            .map(|ip| match ip {
-                IpAddr::V4(v4) => self.address_record(RData::A(A(*v4))),
-                IpAddr::V6(v6) => self.address_record(RData::AAAA(AAAA(*v6))),
+        let mut rng = rand::rng();
+        pool.sample(&mut rng, max)
+            .map(|ip| match *ip {
+                IpAddr::V4(v4) => self.address_record(RData::A(A(v4))),
+                IpAddr::V6(v6) => self.address_record(RData::AAAA(AAAA(v6))),
             })
             .collect()
     }
@@ -197,7 +197,11 @@ impl SeederHandler {
 
 #[async_trait::async_trait]
 impl RequestHandler for SeederHandler {
-    async fn handle_request<R: ResponseHandler>(&self, request: &Request, response_handle: R) -> ResponseInfo {
+    async fn handle_request<R: ResponseHandler, T: hickory_server::net::runtime::Time>(
+        &self,
+        request: &Request,
+        response_handle: R,
+    ) -> ResponseInfo {
         let src = request.src();
 
         let Ok(info) = self.parse_basic(request) else {
@@ -225,11 +229,11 @@ impl RequestHandler for SeederHandler {
             answer.answers.len()
         );
 
-        let mut header = Header::response_from_request(request.header());
-        header.set_authoritative(true);
-        header.set_response_code(ResponseCode::NoError);
+        let mut metadata = Metadata::response_from_request(&request.metadata);
+        metadata.authoritative = true;
+        metadata.response_code = ResponseCode::NoError;
 
-        send(request, response_handle, header, &answer.answers, &answer.ns, &answer.soa).await
+        send(request, response_handle, metadata, &answer.answers, &answer.ns, &answer.soa).await
     }
 }
 
@@ -240,13 +244,13 @@ const fn is_allowed_type(qtype: RecordType) -> bool {
 async fn send<R: ResponseHandler>(
     request: &Request,
     mut response_handle: R,
-    header: Header,
+    metadata: Metadata,
     answers: &[Record],
     ns: &[Record],
     soa: &[Record],
 ) -> ResponseInfo {
     let builder = MessageResponseBuilder::from_message_request(request);
-    let resp = builder.build(header, answers.iter(), ns.iter(), soa.iter(), [].iter());
+    let resp = builder.build(metadata, answers.iter(), ns.iter(), soa.iter(), [].iter());
     match response_handle.send_response(resp).await {
         Ok(info) => info,
         Err(err) => {
@@ -259,7 +263,7 @@ async fn send<R: ResponseHandler>(
 async fn refuse<R: ResponseHandler>(request: &Request, mut response_handle: R) -> ResponseInfo {
     let builder = MessageResponseBuilder::from_message_request(request);
     match response_handle
-        .send_response(builder.error_msg(request.header(), ResponseCode::Refused))
+        .send_response(builder.error_msg(&request.metadata, ResponseCode::Refused))
         .await
     {
         Ok(info) => info,
@@ -273,9 +277,13 @@ fn no_response() -> ResponseInfo {
 }
 
 fn error_info(code: ResponseCode) -> ResponseInfo {
-    let mut header = Header::new();
-    header.set_response_code(code);
-    header.into()
+    let mut metadata = Metadata::new(0, MessageType::Response, OpCode::Query);
+    metadata.response_code = code;
+    Header {
+        metadata,
+        counts: HeaderCounts::default(),
+    }
+    .into()
 }
 
 fn fqdn(host: &str) -> Result<Name, hickory_proto::ProtoError> {

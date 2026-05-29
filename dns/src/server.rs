@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use hickory_server::ServerFuture;
+use hickory_server::server::Server;
 use log::{info, warn};
 use simply_kaspa_dnsseeder_store::PeerStore;
 use socket2::{Domain, Protocol, Socket, Type};
@@ -54,7 +54,7 @@ pub async fn run_dns_server_with_handler(
 ) -> Result<(), Error> {
     assert!(!listen.is_empty(), "listen must be non-empty");
 
-    let mut server = ServerFuture::new(handler);
+    let mut server = Server::new(handler);
     let mut bound_any = false;
     let mut last_err: Option<io::Error> = None;
 
@@ -63,7 +63,7 @@ pub async fn run_dns_server_with_handler(
             Ok((udp, tcp)) => {
                 info!("dns: listening on {addr} (udp+tcp)");
                 server.register_socket(udp);
-                server.register_listener(tcp, tcp_idle);
+                server.register_listener(tcp, tcp_idle, 512);
                 bound_any = true;
             }
             Err(err) if is_soft_bind_failure(&err) => {

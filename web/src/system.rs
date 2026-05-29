@@ -15,7 +15,7 @@ pub(crate) async fn collect_process(system: &RwLock<System>) -> Value {
     sys.refresh_processes_specifics(
         ProcessesToUpdate::Some(&[pid]),
         false,
-        ProcessRefreshKind::new().with_cpu().with_memory(),
+        ProcessRefreshKind::nothing().with_cpu().with_memory(),
     );
     sys.refresh_memory();
     let (cpu, mem_used) = sys

@@ -4,11 +4,11 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use hickory_proto::op::{Message, MessageType, OpCode, Query, ResponseCode};
-use hickory_proto::rr::{DNSClass, Name, RecordType};
+use hickory_proto::rr::{DNSClass, Name, RData, RecordType};
 use hickory_proto::serialize::binary::BinDecodable;
 use hickory_resolver::TokioResolver;
-use hickory_resolver::config::{NameServerConfig, ResolverConfig, ResolverOpts};
-use hickory_resolver::proto::xfer::Protocol;
+use hickory_resolver::config::{ConnectionConfig, NameServerConfig, ResolverConfig, ResolverOpts};
+use hickory_resolver::net::runtime::TokioRuntimeProvider;
 use kaspa_consensus_core::network::{NetworkId, NetworkType};
 use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 use tempfile::TempDir;
@@ -86,14 +86,17 @@ async fn start_server(store: PeerStore) -> (SocketAddr, DnsConfig, broadcast::Se
 }
 
 fn resolver(server: SocketAddr) -> TokioResolver {
-    let mut cfg = ResolverConfig::new();
-    cfg.add_name_server(NameServerConfig::new(server, Protocol::Udp));
+    let mut conn = ConnectionConfig::udp();
+    conn.port = server.port();
+    let ns = NameServerConfig::new(server.ip(), true, vec![conn]);
+    let cfg = ResolverConfig::from_parts(None, vec![], vec![ns]);
     let mut opts = ResolverOpts::default();
     opts.attempts = 1;
     opts.timeout = Duration::from_secs(2);
-    TokioResolver::builder_with_config(cfg, hickory_resolver::name_server::TokioConnectionProvider::default())
+    TokioResolver::builder_with_config(cfg, TokioRuntimeProvider::default())
         .with_options(opts)
         .build()
+        .unwrap()
 }
 
 async fn send_raw_query(server: SocketAddr, query: Message, timeout: Duration) -> Result<Message, &'static str> {
@@ -122,11 +125,8 @@ async fn send_raw_query_bytes(server: SocketAddr, query: Message, timeout: Durat
 }
 
 fn craft_query(name: &str, qtype: RecordType, class: DNSClass, id: u16, op: OpCode) -> Message {
-    let mut msg = Message::new();
-    msg.set_id(id);
-    msg.set_message_type(MessageType::Query);
-    msg.set_op_code(op);
-    msg.set_recursion_desired(false);
+    let mut msg = Message::new(id, MessageType::Query, op);
+    msg.metadata.recursion_desired = false;
     let mut q = Query::new();
     q.set_name(Name::from_str(name).unwrap());
     q.set_query_type(qtype);
@@ -146,7 +146,11 @@ async fn answers_a_records_from_store() {
     let (server, _cfg, shutdown, handle) = start_server(store).await;
     let res = resolver(server);
     let lookup = res.ipv4_lookup(APEX_FQDN).await.unwrap();
-    let ips: Vec<Ipv4Addr> = lookup.iter().map(|a| a.0).collect();
+    let ips: Vec<Ipv4Addr> = lookup
+        .answers()
+        .iter()
+        .filter_map(|r| if let RData::A(a) = &r.data { Some(a.0) } else { None })
+        .collect();
     assert!(ips.contains(&Ipv4Addr::new(1, 2, 3, 4)));
     assert!(ips.contains(&Ipv4Addr::new(5, 6, 7, 8)));
     shutdown.send(()).unwrap();
@@ -163,7 +167,11 @@ async fn aaaa_emits_musl_sentinel_when_no_ipv6_peers() {
     let res = resolver(server);
     let lookup = res.ipv6_lookup(APEX_FQDN).await.unwrap();
     let sentinel = Ipv6Addr::from_str("100::").unwrap();
-    let ips: Vec<Ipv6Addr> = lookup.iter().map(|a| a.0).collect();
+    let ips: Vec<Ipv6Addr> = lookup
+        .answers()
+        .iter()
+        .filter_map(|r| if let RData::AAAA(a) = &r.data { Some(a.0) } else { None })
+        .collect();
     assert_eq!(ips, vec![sentinel]);
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
@@ -204,7 +212,7 @@ async fn ignores_peers_whose_last_success_is_too_old() {
     let res = resolver(server);
     let lookup = res.ipv4_lookup(APEX_FQDN).await;
     if let Ok(l) = lookup {
-        assert_eq!(l.iter().count(), 0, "stale peer must not appear in DNS answers");
+        assert_eq!(l.answers().len(), 0, "stale peer must not appear in DNS answers");
     }
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
@@ -224,7 +232,7 @@ async fn ignores_stub_peers_without_success() {
     let res = resolver(server);
     let lookup = res.ipv4_lookup(APEX_FQDN).await;
     if let Ok(l) = lookup {
-        assert_eq!(l.iter().count(), 0, "stub peer must not appear in DNS answers");
+        assert_eq!(l.answers().len(), 0, "stub peer must not appear in DNS answers");
     }
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
@@ -242,7 +250,7 @@ async fn ignores_peers_with_non_default_port() {
     let res = resolver(server);
     let res = res.ipv4_lookup(APEX_FQDN).await;
     if let Ok(lookup) = res {
-        assert_eq!(lookup.iter().count(), 0);
+        assert_eq!(lookup.answers().len(), 0);
     }
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
@@ -259,8 +267,8 @@ async fn refuses_any_query() {
     let (server, _cfg, shutdown, handle) = start_server(store).await;
     let query = craft_query(APEX_FQDN, RecordType::ANY, DNSClass::IN, 1, OpCode::Query);
     let resp = send_raw_query(server, query, Duration::from_secs(1)).await.expect("must reply");
-    assert_eq!(resp.response_code(), ResponseCode::Refused);
-    assert!(resp.answers().is_empty());
+    assert_eq!(resp.response_code, ResponseCode::Refused);
+    assert!(resp.answers.is_empty());
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
 }
@@ -272,7 +280,7 @@ async fn refuses_axfr_query() {
     let (server, _cfg, shutdown, handle) = start_server(store).await;
     let query = craft_query(APEX_FQDN, RecordType::AXFR, DNSClass::IN, 2, OpCode::Query);
     let resp = send_raw_query(server, query, Duration::from_secs(1)).await.expect("must reply");
-    assert_eq!(resp.response_code(), ResponseCode::Refused);
+    assert_eq!(resp.response_code, ResponseCode::Refused);
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
 }
@@ -290,8 +298,8 @@ async fn refuses_disallowed_qtypes() {
     ] {
         let query = craft_query(APEX_FQDN, qtype, DNSClass::IN, id, OpCode::Query);
         let resp = send_raw_query(server, query, Duration::from_secs(1)).await.expect("must reply");
-        assert_eq!(resp.response_code(), ResponseCode::Refused, "qtype {qtype:?} should be REFUSED");
-        assert!(resp.answers().is_empty());
+        assert_eq!(resp.response_code, ResponseCode::Refused, "qtype {qtype:?} should be REFUSED");
+        assert!(resp.answers.is_empty());
     }
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
@@ -305,7 +313,7 @@ async fn refuses_non_in_class() {
     for (id, class) in [(20, DNSClass::CH), (21, DNSClass::HS), (22, DNSClass::ANY), (23, DNSClass::NONE)] {
         let query = craft_query(APEX_FQDN, RecordType::A, class, id, OpCode::Query);
         let resp = send_raw_query(server, query, Duration::from_secs(1)).await.expect("must reply");
-        assert_eq!(resp.response_code(), ResponseCode::Refused, "class {class:?} should be REFUSED");
+        assert_eq!(resp.response_code, ResponseCode::Refused, "class {class:?} should be REFUSED");
     }
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
@@ -318,7 +326,7 @@ async fn refuses_update_opcode() {
     let (server, _cfg, shutdown, handle) = start_server(store).await;
     let query = craft_query(APEX_FQDN, RecordType::A, DNSClass::IN, 30, OpCode::Update);
     let resp = send_raw_query(server, query, Duration::from_secs(1)).await.expect("must reply");
-    assert_eq!(resp.response_code(), ResponseCode::Refused);
+    assert_eq!(resp.response_code, ResponseCode::Refused);
     shutdown.send(()).unwrap();
     let _ = tokio::time::timeout(Duration::from_secs(1), handle).await;
 }
@@ -348,15 +356,12 @@ async fn response_is_capped_and_randomized() {
     for trial in 0..trials {
         let query = craft_query(APEX_FQDN, RecordType::A, DNSClass::IN, 100 + trial, OpCode::Query);
         let resp = send_raw_query(server, query, Duration::from_secs(1)).await.expect("must reply");
-        assert_eq!(resp.response_code(), ResponseCode::NoError);
-        assert!(resp.answers().len() <= cfg.max_records);
+        assert_eq!(resp.response_code, ResponseCode::NoError);
+        assert!(resp.answers.len() <= cfg.max_records);
         let ips: HashSet<Ipv4Addr> = resp
-            .answers()
+            .answers
             .iter()
-            .filter_map(|r| match r.data() {
-                hickory_proto::rr::RData::A(a) => Some(a.0),
-                _ => None,
-            })
+            .filter_map(|r| if let RData::A(a) = &r.data { Some(a.0) } else { None })
             .collect();
         seen_sets.push(ips);
     }
@@ -386,7 +391,7 @@ async fn rate_limit_drops_silently() {
     let resp = send_raw_query(server, first, Duration::from_secs(1))
         .await
         .expect("first must reply");
-    assert_eq!(resp.response_code(), ResponseCode::NoError);
+    assert_eq!(resp.response_code, ResponseCode::NoError);
 
     let second = craft_query(APEX_FQDN, RecordType::A, DNSClass::IN, 201, OpCode::Query);
     let dropped = send_raw_query(server, second, Duration::from_millis(400)).await;

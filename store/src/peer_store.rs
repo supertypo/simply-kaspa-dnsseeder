@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::filter::Filter;
 use crate::record::{NetAddress, PeerRecord};
 use log::{debug, warn};
-use redb::{Database, Durability, MultimapTableDefinition, ReadableTable, ReadableTableMetadata, TableDefinition};
+use redb::{Database, Durability, MultimapTableDefinition, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -190,12 +190,12 @@ impl PeerStore {
 
     /// Record an attempt at `addr` taken at `now_ms`. Creates a stub if none
     /// exists; otherwise only refreshes `last_attempt_ms`. Uses
-    /// `Durability::Eventual` — losing the latest attempt on crash only
+    /// `Durability::None` — losing the latest attempt on crash only
     /// causes a slightly-early re-probe, far cheaper than fsync per probe.
     pub fn record_attempt(&self, addr: &NetAddress, now_ms: i64) -> Result<PeerRecord, Error> {
         let key = encode_key(addr)?;
         let mut txn = self.db.begin_write()?;
-        txn.set_durability(Durability::Eventual);
+        txn.set_durability(Durability::None).expect("durability set before any open_table");
         let rec = {
             let mut t = txn.open_table(PEERS)?;
             let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
