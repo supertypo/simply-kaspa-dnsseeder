@@ -51,6 +51,8 @@ parking_lot = "0.12.5"
 
 # HTTP server
 axum = { version = "0.8.9", features = ["http1", "json", "tokio"] }
+axum-server = { version = "0.8.0", default-features = false, features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23.40", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tower-http = { version = "0.6.11", features = ["cors", "trace", "set-header"] }
 tower = "0.5.3"
 utoipa = { version = "5.4.0", features = ["axum_extras", "preserve_order"] }

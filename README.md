@@ -85,6 +85,37 @@ simply-kaspa-dnsseeder \
 
 Run `simply-kaspa-dnsseeder --help` for the full list.
 
+## TLS / HTTPS
+
+The HTTP server can serve over TLS by passing both `--tls-cert` and `--tls-key`
+(PEM files). When set, `--http-listen` accepts HTTPS instead of HTTP; supplying
+only one of the two is a startup error.
+
+```bash
+simply-kaspa-dnsseeder \
+  --network-id mainnet \
+  --dns-zone seed.mydomain.org --dns-nameserver ns.mydomain.org \
+  --http-listen 0.0.0.0:5443 \
+  --tls-cert /etc/letsencrypt/live/seed.mydomain.org/fullchain.pem \
+  --tls-key  /etc/letsencrypt/live/seed.mydomain.org/privkey.pem
+```
+
+For a quick development cert:
+
+```bash
+openssl req -x509 -newkey rsa:4096 -nodes \
+  -keyout key.pem -out cert.pem -days 365 -subj "/CN=localhost"
+chmod 600 key.pem
+```
+
+Notes:
+
+- The cert file may be a single certificate or a full chain (`fullchain.pem`).
+- The key may be PKCS8 or PKCS1 PEM. Encrypted keys are not supported.
+- Cert reload requires a process restart.
+- For production, terminating TLS at a reverse proxy (nginx, Caddy, Traefik) is
+  also a perfectly good option and avoids shipping the key alongside the binary.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

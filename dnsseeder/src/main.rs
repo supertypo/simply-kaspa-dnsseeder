@@ -41,6 +41,7 @@ async fn main() {
 }
 
 async fn run(cli: CliArgs) -> Result<()> {
+    cli.validate().map_err(|e| anyhow!(e))?;
     let network_id =
         NetworkId::from_str(&cli.network_id).map_err(|err| anyhow!("invalid --network-id `{}`: {err}", cli.network_id))?;
 
@@ -143,6 +144,8 @@ async fn run(cli: CliArgs) -> Result<()> {
         service_version: CliArgs::version(),
         service_commit: CliArgs::commit_id(),
         service_network: network_id.to_string(),
+        tls_cert: cli.http.tls_cert.clone(),
+        tls_key: cli.http.tls_key.clone(),
     };
     let prober = Arc::new(SchedulerProber::new(probe.clone(), store.clone()));
     let metrics_source: Arc<dyn MetricsSource> = Arc::new(SubsystemMetrics {

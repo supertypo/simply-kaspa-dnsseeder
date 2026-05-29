@@ -13,6 +13,7 @@
 use clap::{Args, Parser};
 use semver::Version;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Parser, Clone, Debug)]
@@ -135,6 +136,14 @@ pub struct HttpArgs {
     /// Window length for `--post-rate-limit`.
     #[clap(long, default_value = "1m", value_parser = humantime::parse_duration)]
     pub rate_limit_window: Duration,
+
+    /// PEM-encoded TLS certificate (chain). Enables HTTPS when set together with `--tls-key`.
+    #[clap(long)]
+    pub tls_cert: Option<PathBuf>,
+
+    /// PEM-encoded TLS private key (PKCS8 or PKCS1). Required together with `--tls-cert`.
+    #[clap(long)]
+    pub tls_key: Option<PathBuf>,
 }
 
 /// Logging options.
@@ -163,6 +172,18 @@ impl CliArgs {
     #[must_use]
     pub fn dns_enabled(&self) -> bool {
         self.dns.dns_zone.is_some() && self.dns.dns_nameserver.is_some()
+    }
+
+    /// Validate cross-field constraints not expressible via clap derive.
+    ///
+    /// # Errors
+    /// Returns an error message if `--tls-cert` and `--tls-key` are not both set or both unset.
+    pub fn validate(&self) -> Result<(), String> {
+        match (&self.http.tls_cert, &self.http.tls_key) {
+            (Some(_), None) => Err("--tls-cert requires --tls-key".to_string()),
+            (None, Some(_)) => Err("--tls-key requires --tls-cert".to_string()),
+            _ => Ok(()),
+        }
     }
 }
 

@@ -41,4 +41,16 @@ pub struct WebConfig {
     pub service_commit: &'static str,
     /// Network id label reported by `/metrics`.
     pub service_network: String,
+    /// Path to a PEM certificate (chain). When set together with `tls_key`, the
+    /// server listens over HTTPS on `listen` instead of plain HTTP.
+    pub tls_cert: Option<PathBuf>,
+    /// Path to a PEM private key (PKCS8 or PKCS1). Required iff `tls_cert` is set.
+    pub tls_key: Option<PathBuf>,
+}
+
+impl WebConfig {
+    #[must_use]
+    pub fn tls_enabled(&self) -> bool {
+        self.tls_cert.is_some() && self.tls_key.is_some()
+    }
 }
