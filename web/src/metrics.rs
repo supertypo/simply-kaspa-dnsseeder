@@ -29,38 +29,9 @@ impl WebMetrics {
         self.accepted.fetch_add(1, Ordering::Relaxed);
     }
 
-    pub fn record_rejected(&self) {
+    pub fn record_post_rejection(&self, reason: PostRejection) {
         self.rejected.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn record_post_rejected_auth(&self) {
-        self.rejected.fetch_add(1, Ordering::Relaxed);
-        self.post_rejected_auth.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn record_post_rejected_cors(&self) {
-        self.rejected.fetch_add(1, Ordering::Relaxed);
-        self.post_rejected_cors.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn record_post_rejected_ratelimit(&self) {
-        self.rejected.fetch_add(1, Ordering::Relaxed);
-        self.post_rejected_ratelimit.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn record_post_rejected_format(&self) {
-        self.rejected.fetch_add(1, Ordering::Relaxed);
-        self.post_rejected_format.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn record_post_rejected_unroutable(&self) {
-        self.rejected.fetch_add(1, Ordering::Relaxed);
-        self.post_rejected_unroutable.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub fn record_post_rejected_probe(&self) {
-        self.rejected.fetch_add(1, Ordering::Relaxed);
-        self.post_rejected_probe.fetch_add(1, Ordering::Relaxed);
+        reason.counter(self).fetch_add(1, Ordering::Relaxed);
     }
 
     #[must_use]
@@ -103,4 +74,27 @@ pub struct WebSnapshot {
     pub post_rejected_format: u64,
     pub post_rejected_unroutable: u64,
     pub post_rejected_probe: u64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum PostRejection {
+    Auth,
+    Cors,
+    RateLimit,
+    Format,
+    Unroutable,
+    Probe,
+}
+
+impl PostRejection {
+    fn counter(self, m: &WebMetrics) -> &AtomicU64 {
+        match self {
+            Self::Auth => &m.post_rejected_auth,
+            Self::Cors => &m.post_rejected_cors,
+            Self::RateLimit => &m.post_rejected_ratelimit,
+            Self::Format => &m.post_rejected_format,
+            Self::Unroutable => &m.post_rejected_unroutable,
+            Self::Probe => &m.post_rejected_probe,
+        }
+    }
 }

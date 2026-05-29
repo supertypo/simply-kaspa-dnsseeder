@@ -27,7 +27,6 @@ pub struct HealthResponse {
 }
 
 pub(crate) async fn handler(State(state): State<AppState>) -> Response {
-    state.obs.metrics.record_request();
     let now = now_ms();
     let stale_good_ms = duration_to_ms(state.config.stale_good);
     let summary = match state.runtime.store.blocking(move |s| s.summary(now, stale_good_ms, None)).await {

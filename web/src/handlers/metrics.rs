@@ -82,7 +82,6 @@ pub struct RateLimiterSubsystem {
 }
 
 pub(crate) async fn handler(State(state): State<AppState>) -> Response {
-    state.obs.metrics.record_request();
     let now = now_ms();
     let stale_good_ms = duration_to_ms(state.config.stale_good);
     let validity = Filter::serving(

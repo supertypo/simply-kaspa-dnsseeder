@@ -14,6 +14,7 @@ use simply_kaspa_dnsseeder_store::{Filter, NetAddress};
 
 use crate::config::WebConfig;
 use crate::dto::PeerDto;
+use crate::metrics::PostRejection;
 use crate::state::AppState;
 use simply_kaspa_dnsseeder_common::{canonicalize_ip, duration_to_ms, now_ms};
 
@@ -47,12 +48,11 @@ fn list_filter(cfg: &WebConfig, all: bool) -> Filter {
 }
 
 pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {
-    state.obs.metrics.record_request();
+    let _ = state;
     "pong"
 }
 
 pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>, headers: HeaderMap) -> Response {
-    state.obs.metrics.record_request();
     let expose = authenticated(&headers, &state.config.api_key);
     let cache_key = crate::peers_cache::Key { all: q.all, expose };
     if let Some(body) = state.peers_cache.get(cache_key) {
@@ -82,16 +82,7 @@ pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuer
     ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
-pub(crate) async fn get(
-    State(state): State<AppState>,
-    Path(addr_str): Path<String>,
-    Query(q): Query<ListQuery>,
-    headers: HeaderMap,
-) -> Response {
-    state.obs.metrics.record_request();
-    if !authenticated(&headers, &state.config.api_key) {
-        return (StatusCode::UNAUTHORIZED, "missing or invalid api key").into_response();
-    }
+pub(crate) async fn get(State(state): State<AppState>, Path(addr_str): Path<String>, Query(q): Query<ListQuery>) -> Response {
     let Ok(addr) = SocketAddr::from_str(&addr_str) else {
         return (StatusCode::BAD_REQUEST, "addr must be ip:port").into_response();
     };
@@ -116,28 +107,22 @@ pub(crate) async fn submit(
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    state.obs.metrics.record_request();
-    if !authenticated(&headers, &state.config.api_key) {
-        state.obs.metrics.record_post_rejected_auth();
-        return (StatusCode::UNAUTHORIZED, "missing or invalid api key").into_response();
-    }
-
     if !state.config.allowed_origins.is_empty() {
         let origin = headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok()).unwrap_or("");
         if !state.config.allowed_origins.iter().any(|o| o == origin) {
-            state.obs.metrics.record_post_rejected_cors();
+            state.obs.metrics.record_post_rejection(PostRejection::Cors);
             return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
         }
     }
 
     let client = client_ip(&headers, remote);
     if !state.limiter.check(client) {
-        state.obs.metrics.record_post_rejected_ratelimit();
+        state.obs.metrics.record_post_rejection(PostRejection::RateLimit);
         return (StatusCode::TOO_MANY_REQUESTS, "rate limited").into_response();
     }
 
     let Ok(addr) = SocketAddr::from_str(body.trim()) else {
-        state.obs.metrics.record_post_rejected_format();
+        state.obs.metrics.record_post_rejection(PostRejection::Format);
         return (StatusCode::BAD_REQUEST, "invalid ip:port").into_response();
     };
 
@@ -146,7 +131,7 @@ pub(crate) async fn submit(
         port: addr.port(),
     };
     if !is_acceptable_address(&net, state.config.network_default_port, state.config.strict_port) {
-        state.obs.metrics.record_post_rejected_unroutable();
+        state.obs.metrics.record_post_rejection(PostRejection::Unroutable);
         return (
             StatusCode::BAD_REQUEST,
             "address is not publicly routable or uses a disallowed port",
@@ -162,7 +147,7 @@ pub(crate) async fn submit(
             (StatusCode::OK, Json(PeerDto::from_record(&rec, true))).into_response()
         }
         Err(err) => {
-            state.obs.metrics.record_post_rejected_probe();
+            state.obs.metrics.record_post_rejection(PostRejection::Probe);
             debug!("web: POST /peers probe of {addr} failed: {err}");
             (StatusCode::BAD_GATEWAY, format!("probe failed: {err}")).into_response()
         }
