@@ -9,42 +9,44 @@ fn parse(args: &[&str]) -> CliArgs {
 }
 
 #[test]
-fn parses_required_network_id() {
-    let cli = parse(&["--network-id", "kaspa-mainnet"]);
-    assert_eq!(cli.network_id, "kaspa-mainnet");
+fn network_id_defaults_to_mainnet() {
+    let cli = parse(&[]);
+    assert_eq!(cli.network_id, "mainnet");
+    let cli = parse(&["--network-id", "testnet-10"]);
+    assert_eq!(cli.network_id, "testnet-10");
 }
 
 #[test]
 fn threads_zero_rejected() {
-    let res = CliArgs::try_parse_from(["simply-kaspa-dnsseeder", "--network-id", "kaspa-mainnet", "--threads", "0"]);
+    let res = CliArgs::try_parse_from(["simply-kaspa-dnsseeder", "--network-id", "mainnet", "--threads", "0"]);
     assert!(res.is_err(), "--threads 0 must be rejected");
 }
 
 #[test]
 fn probes_per_peer_bounds_enforced() {
     for bad in ["0", "11", "100"] {
-        let res = CliArgs::try_parse_from(["simply-kaspa-dnsseeder", "--network-id", "kaspa-mainnet", "--probes-per-peer", bad]);
+        let res = CliArgs::try_parse_from(["simply-kaspa-dnsseeder", "--network-id", "mainnet", "--probes-per-peer", bad]);
         assert!(res.is_err(), "--probes-per-peer {bad} must be rejected");
     }
     for good in ["1", "5", "10"] {
-        let cli = parse(&["--network-id", "kaspa-mainnet", "--probes-per-peer", good]);
+        let cli = parse(&["--network-id", "mainnet", "--probes-per-peer", good]);
         assert_eq!(cli.crawler.probes_per_peer, good.parse::<u8>().unwrap());
     }
 }
 
 #[test]
 fn strict_port_flag_toggles() {
-    let cli = parse(&["--network-id", "kaspa-mainnet", "--strict-port"]);
+    let cli = parse(&["--network-id", "mainnet", "--strict-port"]);
     assert!(cli.crawler.strict_port);
 }
 
 #[test]
 fn dns_enabled_only_when_both_set() {
-    let cli = parse(&["--network-id", "kaspa-mainnet", "--dns-zone", "seed.test"]);
+    let cli = parse(&["--network-id", "mainnet", "--dns-zone", "seed.test"]);
     assert!(!cli.dns_enabled());
     let cli = parse(&[
         "--network-id",
-        "kaspa-mainnet",
+        "mainnet",
         "--dns-zone",
         "seed.test",
         "--dns-nameserver",
@@ -57,7 +59,7 @@ fn dns_enabled_only_when_both_set() {
 fn humantime_durations_parse() {
     let cli = parse(&[
         "--network-id",
-        "kaspa-mainnet",
+        "mainnet",
         "--probe-tick",
         "5s",
         "--stale-good",
@@ -75,7 +77,7 @@ fn humantime_durations_parse() {
 
 #[test]
 fn min_user_agent_parses_semver() {
-    let cli = parse(&["--network-id", "kaspa-mainnet", "--min-user-agent", "1.2.3"]);
+    let cli = parse(&["--network-id", "mainnet", "--min-user-agent", "1.2.3"]);
     let v = cli.dns.min_user_agent.expect("min_user_agent");
     assert_eq!(v.major, 1);
     assert_eq!(v.minor, 2);
@@ -88,7 +90,7 @@ fn min_user_agent_rejects_garbage() {
         CliArgs::try_parse_from([
             "simply-kaspa-dnsseeder",
             "--network-id",
-            "kaspa-mainnet",
+            "mainnet",
             "--min-user-agent",
             "not-a-version"
         ])
@@ -98,6 +100,6 @@ fn min_user_agent_rejects_garbage() {
 
 #[test]
 fn allowed_origins_parses_csv() {
-    let cli = parse(&["--network-id", "kaspa-mainnet", "--allowed-origins", "http://a,http://b"]);
+    let cli = parse(&["--network-id", "mainnet", "--allowed-origins", "http://a,http://b"]);
     assert_eq!(cli.http.allowed_origins, vec!["http://a", "http://b"]);
 }

@@ -27,7 +27,7 @@ You need two pieces of DNS infrastructure in place before starting:
 
 ```bash
 simply-kaspa-dnsseeder \
-  --network-id kaspa-testnet-10 \
+  --network-id testnet-10 \
   --dns-zone n-testnet-10.mydomain.org \
   --dns-nameserver ns-testnet-10.mydomain.org \
   --dns-listen 0.0.0.0:53 \
@@ -58,7 +58,7 @@ All HTTP endpoints are served under the `--api-prefix` (default `/api`); pass `-
 
 ```bash
 simply-kaspa-dnsseeder \
-  --network-id kaspa-mainnet \
+  --network-id mainnet \
   --dns-zone seed.mydomain.org \
   --dns-nameserver ns.mydomain.org \
   --strict-port \

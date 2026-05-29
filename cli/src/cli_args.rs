@@ -18,8 +18,8 @@ use std::time::Duration;
 #[derive(Parser, Clone, Debug)]
 #[command(name = "simply-kaspa-dnsseeder", version = env!("VERGEN_GIT_DESCRIBE"), about = "Kaspa DNS seeder")]
 pub struct CliArgs {
-    /// Network identifier (e.g. `kaspa-mainnet`, `kaspa-testnet-10`).
-    #[clap(short = 'n', long)]
+    /// Network identifier (e.g. `mainnet`, `testnet-10`, `devnet`, `simnet`).
+    #[clap(short = 'n', long, default_value = "mainnet")]
     pub network_id: String,
 
     /// Directory used for persistent storage.
@@ -113,7 +113,7 @@ pub struct DnsArgs {
 #[derive(Args, Clone, Debug)]
 pub struct HttpArgs {
     /// HTTP server bind address.
-    #[clap(long, default_value = "127.0.0.1:5381")]
+    #[clap(long, default_value = "127.0.0.1:8080")]
     pub http_listen: String,
 
     /// URL prefix for all HTTP endpoints (e.g. `/api`). Use `""` to serve at the root.
