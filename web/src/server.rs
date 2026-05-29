@@ -5,6 +5,7 @@ use std::time::Duration;
 use axum_server::Handle;
 use axum_server::tls_rustls::RustlsConfig;
 use log::{info, warn};
+use socket2::{Domain, Protocol, Socket, Type};
 use tokio::sync::broadcast;
 use tokio::task::JoinSet;
 
@@ -13,6 +14,25 @@ use crate::router::build_router;
 use crate::state::AppState;
 
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const LISTEN_BACKLOG: i32 = 1024;
+
+/// Bind a listening TCP socket with platform-consistent options.
+///
+/// Sets `IPV6_V6ONLY` on IPv6 sockets so dual-stack `[::]` and `0.0.0.0`
+/// listeners on the same port don't collide on macOS/BSD (where the system
+/// default is `v6only=0`, causing `[::]` to also claim IPv4 traffic).
+fn bind_listener(addr: SocketAddr) -> std::io::Result<std::net::TcpListener> {
+    let domain = if addr.is_ipv6() { Domain::IPV6 } else { Domain::IPV4 };
+    let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))?;
+    if addr.is_ipv6() {
+        socket.set_only_v6(true)?;
+    }
+    socket.set_reuse_address(true)?;
+    socket.set_nonblocking(true)?;
+    socket.bind(&addr.into())?;
+    socket.listen(LISTEN_BACKLOG)?;
+    Ok(socket.into())
+}
 
 async fn load_tls(cert: &Path, key: &Path) -> Result<RustlsConfig, Error> {
     let cert_bytes = tokio::fs::read(cert).await.map_err(|source| Error::Tls {
@@ -64,14 +84,14 @@ pub async fn run_web_server(state: AppState, mut shutdown: broadcast::Receiver<(
     for addr in listen {
         let handle = handle.clone();
         let svc = make_service.clone();
+        let std_listener = bind_listener(addr).map_err(|source| Error::Bind { addr, source })?;
         info!("{scheme}: listening on {addr}");
-        match tls_config.clone() {
-            Some(tls) => {
-                servers.spawn(async move { axum_server::bind_rustls(addr, tls).handle(handle).serve(svc).await });
-            }
-            None => {
-                servers.spawn(async move { axum_server::bind(addr).handle(handle).serve(svc).await });
-            }
+        if let Some(tls) = tls_config.clone() {
+            let server = axum_server::from_tcp_rustls(std_listener, tls).map_err(|source| Error::Bind { addr, source })?;
+            servers.spawn(async move { server.handle(handle).serve(svc).await });
+        } else {
+            let server = axum_server::from_tcp(std_listener).map_err(|source| Error::Bind { addr, source })?;
+            servers.spawn(async move { server.handle(handle).serve(svc).await });
         }
     }
 

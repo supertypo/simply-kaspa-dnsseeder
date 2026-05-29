@@ -1,3 +1,4 @@
+use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use thiserror::Error;
@@ -32,4 +33,10 @@ pub enum Error {
     },
     #[error("no listen addresses configured")]
     NoListenAddrs,
+    #[error("failed to bind {addr}: {source}")]
+    Bind {
+        addr: SocketAddr,
+        #[source]
+        source: std::io::Error,
+    },
 }

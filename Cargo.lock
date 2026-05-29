@@ -3505,6 +3505,7 @@ dependencies = [
  "simply-kaspa-dnsseeder-common",
  "simply-kaspa-dnsseeder-crawler",
  "simply-kaspa-dnsseeder-store",
+ "socket2",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.18",
