@@ -8,7 +8,6 @@ pub struct WebMetrics {
     pub accepted: AtomicU64,
     pub rejected: AtomicU64,
     pub post_rejected_auth: AtomicU64,
-    pub post_rejected_cors: AtomicU64,
     pub post_rejected_ratelimit: AtomicU64,
     pub post_rejected_format: AtomicU64,
     pub post_rejected_unroutable: AtomicU64,
@@ -41,7 +40,6 @@ impl WebMetrics {
             accepted: self.accepted.load(Ordering::Relaxed),
             rejected: self.rejected.load(Ordering::Relaxed),
             post_rejected_auth: self.post_rejected_auth.load(Ordering::Relaxed),
-            post_rejected_cors: self.post_rejected_cors.load(Ordering::Relaxed),
             post_rejected_ratelimit: self.post_rejected_ratelimit.load(Ordering::Relaxed),
             post_rejected_format: self.post_rejected_format.load(Ordering::Relaxed),
             post_rejected_unroutable: self.post_rejected_unroutable.load(Ordering::Relaxed),
@@ -54,7 +52,6 @@ impl WebMetrics {
         self.accepted.store(snap.accepted, Ordering::Relaxed);
         self.rejected.store(snap.rejected, Ordering::Relaxed);
         self.post_rejected_auth.store(snap.post_rejected_auth, Ordering::Relaxed);
-        self.post_rejected_cors.store(snap.post_rejected_cors, Ordering::Relaxed);
         self.post_rejected_ratelimit.store(snap.post_rejected_ratelimit, Ordering::Relaxed);
         self.post_rejected_format.store(snap.post_rejected_format, Ordering::Relaxed);
         self.post_rejected_unroutable
@@ -69,7 +66,6 @@ pub struct WebSnapshot {
     pub accepted: u64,
     pub rejected: u64,
     pub post_rejected_auth: u64,
-    pub post_rejected_cors: u64,
     pub post_rejected_ratelimit: u64,
     pub post_rejected_format: u64,
     pub post_rejected_unroutable: u64,
@@ -79,7 +75,6 @@ pub struct WebSnapshot {
 #[derive(Debug, Clone, Copy)]
 pub enum PostRejection {
     Auth,
-    Cors,
     RateLimit,
     Format,
     Unroutable,
@@ -90,7 +85,6 @@ impl PostRejection {
     fn counter(self, m: &WebMetrics) -> &AtomicU64 {
         match self {
             Self::Auth => &m.post_rejected_auth,
-            Self::Cors => &m.post_rejected_cors,
             Self::RateLimit => &m.post_rejected_ratelimit,
             Self::Format => &m.post_rejected_format,
             Self::Unroutable => &m.post_rejected_unroutable,

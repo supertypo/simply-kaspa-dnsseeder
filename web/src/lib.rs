@@ -1,11 +1,12 @@
 //! HTTP/JSON façade for the seeder.
 //!
-//! Routes: `/ping`, `/health`, `/peers` (list/get/post), `/metrics`.
+//! Routes: `/health`, `/peers` (list/get/post), `/metrics`.
 //! IP addresses are exposed only when no `--api-key` is set or a matching
 //! `X-API-KEY` header is present.
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
+mod api_error;
 pub mod config;
 pub mod dto;
 pub mod error;
@@ -13,6 +14,7 @@ mod handlers;
 pub mod metrics;
 pub mod metrics_source;
 mod middleware;
+mod openapi;
 mod peers_cache;
 pub mod prober;
 pub mod router;

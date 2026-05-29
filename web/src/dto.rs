@@ -7,15 +7,16 @@
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 use simply_kaspa_dnsseeder_store::{PeerRecord, UNKNOWN_PEER_ID};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(untagged)]
 pub enum PeerDto {
     Full(FullPeerDto),
     Public(PublicPeerDto),
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicPeerDto {
     pub port: u16,
@@ -26,7 +27,7 @@ pub struct PublicPeerDto {
     pub last_success: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct FullPeerDto {
     // Address.

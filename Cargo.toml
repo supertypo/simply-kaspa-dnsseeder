@@ -51,8 +51,11 @@ parking_lot = "0.12.5"
 
 # HTTP server
 axum = { version = "0.8.9", features = ["http1", "json", "tokio"] }
-tower-http = { version = "0.6.11", features = ["cors"] }
+tower-http = { version = "0.6.11", features = ["cors", "trace", "set-header"] }
 tower = "0.5.3"
+utoipa = { version = "5.4.0", features = ["axum_extras", "preserve_order"] }
+utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+utoipa-axum = "0.2.0"
 
 # DNS server
 hickory-server = { version = "0.26.1", features = ["resolver"] }

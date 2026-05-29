@@ -12,6 +12,7 @@ use serde::Deserialize;
 use simply_kaspa_dnsseeder_crawler::is_acceptable_address;
 use simply_kaspa_dnsseeder_store::{Filter, NetAddress};
 
+use crate::api_error::ApiError;
 use crate::config::WebConfig;
 use crate::dto::PeerDto;
 use crate::metrics::PostRejection;
@@ -47,11 +48,21 @@ fn list_filter(cfg: &WebConfig, all: bool) -> Filter {
     )
 }
 
-pub(crate) async fn ping(State(state): State<AppState>) -> &'static str {
-    let _ = state;
-    "pong"
-}
+pub(crate) const LIST_PATH: &str = "/peers";
+pub(crate) const GET_PATH: &str = "/peers/{addr}";
+pub(crate) const SUBMIT_PATH: &str = "/peers";
 
+#[utoipa::path(
+    get,
+    path = LIST_PATH,
+    tag = "peers",
+    params(
+        ("all" = Option<bool>, Query, description = "Bypass protocol-version and user-agent filters"),
+    ),
+    responses(
+        (status = 200, description = "List of peers (IPs stripped without valid X-API-KEY)", body = [PeerDto]),
+    ),
+)]
 pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuery>, headers: HeaderMap) -> Response {
     let expose = authenticated(&headers, &state.config.api_key);
     let cache_key = crate::peers_cache::Key { all: q.all, expose };
@@ -63,7 +74,7 @@ pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuer
         Ok(v) => v,
         Err(err) => {
             warn!("web: GET /peers store error: {err}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response();
+            return ApiError::Internal("store error").into_response();
         }
     };
     records.sort_by_key(|r| std::cmp::Reverse(r.last_success_ms));
@@ -75,16 +86,32 @@ pub(crate) async fn list(State(state): State<AppState>, Query(q): Query<ListQuer
         Ok(v) => axum::body::Bytes::from(v),
         Err(err) => {
             warn!("web: GET /peers serialize error: {err}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "serialize error").into_response();
+            return ApiError::Internal("serialize error").into_response();
         }
     };
     state.peers_cache.put(cache_key, body.clone());
     ([(axum::http::header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
+#[utoipa::path(
+    get,
+    path = GET_PATH,
+    tag = "peers",
+    params(
+        ("addr" = String, Path, description = "Peer address as ip:port"),
+        ("all" = Option<bool>, Query, description = "Bypass protocol-version and user-agent filters"),
+    ),
+    responses(
+        (status = 200, description = "Peer record", body = PeerDto),
+        (status = 400, description = "Bad address"),
+        (status = 401, description = "Missing or invalid X-API-KEY"),
+        (status = 404, description = "Peer not found"),
+    ),
+    security(("api_key" = [])),
+)]
 pub(crate) async fn get(State(state): State<AppState>, Path(addr_str): Path<String>, Query(q): Query<ListQuery>) -> Response {
     let Ok(addr) = SocketAddr::from_str(&addr_str) else {
-        return (StatusCode::BAD_REQUEST, "addr must be ip:port").into_response();
+        return ApiError::BadRequest("addr must be ip:port").into_response();
     };
     let net = NetAddress {
         ip: canonicalize_ip(addr.ip()),
@@ -93,37 +120,43 @@ pub(crate) async fn get(State(state): State<AppState>, Path(addr_str): Path<Stri
     let filter = list_filter(&state.config, q.all);
     match state.runtime.store.blocking(move |s| s.get(&net)).await {
         Ok(Some(rec)) if filter.matches(&rec) => Json(PeerDto::from_record(&rec, true)).into_response(),
-        Ok(_) => (StatusCode::NOT_FOUND, "peer not found").into_response(),
+        Ok(_) => ApiError::NotFound("peer not found").into_response(),
         Err(err) => {
             warn!("web: GET /peers/<addr> store error: {err}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "store error").into_response()
+            ApiError::Internal("store error").into_response()
         }
     }
 }
 
+#[utoipa::path(
+    post,
+    path = SUBMIT_PATH,
+    tag = "peers",
+    request_body(content = String, description = "Peer address as ip:port", content_type = "text/plain"),
+    responses(
+        (status = 200, description = "Peer probed and accepted", body = PeerDto),
+        (status = 400, description = "Bad address or not publicly routable"),
+        (status = 401, description = "Missing or invalid X-API-KEY"),
+        (status = 429, description = "Rate limited"),
+        (status = 502, description = "Probe failed"),
+    ),
+    security(("api_key" = [])),
+)]
 pub(crate) async fn submit(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: String,
 ) -> Response {
-    if !state.config.allowed_origins.is_empty() {
-        let origin = headers.get(axum::http::header::ORIGIN).and_then(|v| v.to_str().ok()).unwrap_or("");
-        if !state.config.allowed_origins.iter().any(|o| o == origin) {
-            state.obs.metrics.record_post_rejection(PostRejection::Cors);
-            return (StatusCode::FORBIDDEN, "origin not allowed").into_response();
-        }
-    }
-
     let client = client_ip(&headers, remote);
     if !state.limiter.check(client) {
         state.obs.metrics.record_post_rejection(PostRejection::RateLimit);
-        return (StatusCode::TOO_MANY_REQUESTS, "rate limited").into_response();
+        return ApiError::RateLimited("rate limited").into_response();
     }
 
     let Ok(addr) = SocketAddr::from_str(body.trim()) else {
         state.obs.metrics.record_post_rejection(PostRejection::Format);
-        return (StatusCode::BAD_REQUEST, "invalid ip:port").into_response();
+        return ApiError::BadRequest("invalid ip:port").into_response();
     };
 
     let net = NetAddress {
@@ -132,11 +165,7 @@ pub(crate) async fn submit(
     };
     if !is_acceptable_address(&net, state.config.network_default_port, state.config.strict_port) {
         state.obs.metrics.record_post_rejection(PostRejection::Unroutable);
-        return (
-            StatusCode::BAD_REQUEST,
-            "address is not publicly routable or uses a disallowed port",
-        )
-            .into_response();
+        return ApiError::BadRequest("address is not publicly routable or uses a disallowed port").into_response();
     }
     let addr = SocketAddr::new(net.ip, net.port);
 
@@ -149,7 +178,7 @@ pub(crate) async fn submit(
         Err(err) => {
             state.obs.metrics.record_post_rejection(PostRejection::Probe);
             debug!("web: POST /peers probe of {addr} failed: {err}");
-            (StatusCode::BAD_GATEWAY, format!("probe failed: {err}")).into_response()
+            ApiError::BadGateway(format!("probe failed: {err}")).into_response()
         }
     }
 }

@@ -6,8 +6,9 @@ use log::debug;
 use serde::Serialize;
 use sysinfo::{Disks, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tokio::sync::RwLock;
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct ProcessInfo {
     pub cpu_used_percent: f32,
     pub memory_used_bytes: u64,
@@ -16,7 +17,7 @@ pub(crate) struct ProcessInfo {
     pub memory_free_pretty: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub(crate) struct DiskInfo {
     pub db_path: String,
     pub db_size_bytes: u64,
@@ -40,11 +41,13 @@ pub(crate) async fn collect_process(system: &RwLock<System>) -> ProcessInfo {
     let (cpu, mem_used) = sys
         .process(pid)
         .map_or((0.0_f32, 0_u64), |p| ((p.cpu_usage() * 10.0).round() / 10.0, p.memory()));
-    let mem_free = if sys.available_memory() > 0 {
-        sys.available_memory()
-    } else {
-        sys.free_memory()
-    };
+    let mem_free = cgroup_free_memory().unwrap_or_else(|| {
+        if sys.available_memory() > 0 {
+            sys.available_memory()
+        } else {
+            sys.free_memory()
+        }
+    });
     ProcessInfo {
         cpu_used_percent: cpu,
         memory_used_bytes: mem_used,
@@ -52,6 +55,26 @@ pub(crate) async fn collect_process(system: &RwLock<System>) -> ProcessInfo {
         memory_free_bytes: mem_free,
         memory_free_pretty: bytesize::ByteSize(mem_free).to_string(),
     }
+}
+
+#[cfg(target_os = "linux")]
+fn cgroup_free_memory() -> Option<u64> {
+    let max = std::fs::read_to_string("/sys/fs/cgroup/memory.max")
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()?;
+    let current = std::fs::read_to_string("/sys/fs/cgroup/memory.current")
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()?;
+    Some(max.saturating_sub(current))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn cgroup_free_memory() -> Option<u64> {
+    None
 }
 
 pub(crate) fn collect_disk(db_path: &Path) -> DiskInfo {

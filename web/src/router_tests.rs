@@ -100,18 +100,6 @@ fn seeded_store() -> (TempDir, PeerStore) {
 }
 
 #[tokio::test]
-async fn ping_returns_pong() {
-    let temp = TempDir::new().unwrap();
-    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
-    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
-    let app = build_router(state);
-    let res = app.oneshot(Request::get("/ping").body(Body::empty()).unwrap()).await.unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
-    let body = to_bytes(res.into_body(), 1024).await.unwrap();
-    assert_eq!(&body[..], b"pong");
-}
-
-#[tokio::test]
 async fn list_peers_strips_ip_when_unauthenticated() {
     let (_temp, store) = seeded_store();
     let state = make_state(Arc::new(MockProber::default()), store, "secret");
@@ -492,4 +480,36 @@ async fn list_peers_hides_stubs_in_both_modes() {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json.as_array().unwrap().len(), 0, "stubs must never appear (url={url})");
     }
+}
+
+#[tokio::test]
+async fn openapi_json_served_unauthenticated() {
+    let temp = TempDir::new().unwrap();
+    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
+    let state = make_state(Arc::new(MockProber::default()), store, "secret");
+    let app = build_router(state);
+    let res = app
+        .oneshot(Request::get("/swagger/openapi.json").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = to_bytes(res.into_body(), 256 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["openapi"].as_str().unwrap().chars().next(), Some('3'));
+    assert!(json["paths"]["/peers"].is_object());
+    assert!(json["paths"]["/health"].is_object());
+    assert!(json["paths"]["/metrics"].is_object());
+}
+
+#[tokio::test]
+async fn responses_have_default_cache_control() {
+    let (_temp, store) = seeded_store();
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
+    let app = build_router(state);
+    let res = app.oneshot(Request::get("/peers").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get(axum::http::header::CACHE_CONTROL).map(|v| v.to_str().unwrap()),
+        Some("public, max-age=5")
+    );
 }
