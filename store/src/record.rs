@@ -36,20 +36,15 @@ pub struct PeerRecord {
 }
 
 impl PeerRecord {
-    /// Parses the kaspad-style user-agent token (`/kaspad:X.Y.Z/...`)
-    /// and returns the version found in the first segment matching `kaspad:`,
-    /// or `None` if the field cannot be parsed.
+    /// Parses the kaspad-style user-agent token. The agent MUST start with the
+    /// literal prefix `/kaspad:`; only the first slash-delimited segment after
+    /// that prefix is read, and a trailing `(comment)` is stripped. Returns
+    /// `None` for anything that doesn't conform.
     #[must_use]
     pub fn parse_kaspad_version(user_agent: &str) -> Option<semver::Version> {
-        for segment in user_agent.split('/') {
-            if let Some(rest) = segment.strip_prefix("kaspad:") {
-                // strip trailing "(comment)" if present
-                let v = rest.split_once('(').map_or(rest, |(v, _)| v).trim();
-                if let Ok(v) = semver::Version::parse(v) {
-                    return Some(v);
-                }
-            }
-        }
-        None
+        let rest = user_agent.strip_prefix("/kaspad:")?;
+        let segment = rest.split('/').next().unwrap_or(rest);
+        let v = segment.split_once('(').map_or(segment, |(v, _)| v).trim();
+        semver::Version::parse(v).ok()
     }
 }

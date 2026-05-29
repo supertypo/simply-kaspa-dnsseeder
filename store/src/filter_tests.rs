@@ -43,6 +43,15 @@ fn unparseable_user_agent() {
 }
 
 #[test]
+fn rejects_non_kaspad_prefix() {
+    // strict-start: anything not beginning with `/kaspad:` is rejected.
+    assert!(PeerRecord::parse_kaspad_version("kaspad:1.0.0/").is_none());
+    assert!(PeerRecord::parse_kaspad_version("other/kaspad:1.0.0/").is_none());
+    assert!(PeerRecord::parse_kaspad_version("/notkaspad:1.0.0/").is_none());
+    assert!(PeerRecord::parse_kaspad_version("").is_none());
+}
+
+#[test]
 fn rejects_dead_peer() {
     let f = Filter {
         now_ms: 1_000_000,
