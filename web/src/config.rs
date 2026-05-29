@@ -36,11 +36,8 @@ pub struct WebConfig {
     /// Minimum kaspad semver peers must advertise to appear in `GET /peers`
     /// (mirrors the DNS filter). `?all=true` bypasses this.
     pub min_user_agent: Option<Version>,
-    /// Process name reported by `/metrics`.
     pub service_name: &'static str,
-    /// Service version reported by `/metrics` and `/health`.
     pub service_version: &'static str,
-    /// Git short SHA reported by `/metrics`.
     pub service_commit: &'static str,
     /// Network id label reported by `/metrics`.
     pub service_network: String,

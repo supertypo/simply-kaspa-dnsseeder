@@ -61,8 +61,6 @@ pub fn peer_id_from_bytes(bytes: &[u8]) -> PeerId {
 /// Ports at or above this value are almost always client-side source ports, not listening sockets.
 pub const EPHEMERAL_PORT_FLOOR: u16 = 32_768;
 
-/// Returns true iff `addr` is worth probing: non-zero port, publicly routable
-/// IP, and a port consistent with `strict_port` / ephemeral-floor rules.
 #[must_use]
 pub fn is_acceptable_address(addr: &NetAddress, default_port: u16, strict_port: bool) -> bool {
     if addr.port == 0 {

@@ -101,8 +101,7 @@ pub(super) fn render(b: &Block) -> Vec<String> {
     out
 }
 
-/// Render a single stats row. `label` occupies the 8-wide section column (blank
-/// for continuation rows). Each cell pads `key` to 9 chars and `value` to 17.
+/// Render a single stats row. `label` is the leftmost section column (blank on continuation rows).
 fn row(label: &str, k1: &str, v1: &str, k2: &str, v2: &str, k3: &str, v3: &str) -> String {
     format!("  {label:<8}{k1:<9} {v1:<17} \u{2502} {k2:<9} {v2:<17} \u{2502} {k3:<9} {v3}")
 }

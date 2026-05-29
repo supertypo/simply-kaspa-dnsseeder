@@ -2,9 +2,7 @@
 
 ## What is this
 
-A Kaspa DNS seeder: it crawls the Kaspa P2P network, stores reachable peers, and serves a subset of them over an authoritative DNS zone so new nodes can bootstrap. Rust port of the classic Go `dnsseeder` (kept under `../dnsseeder` for reference).
-
-Workspace layout (just so the names map cleanly): `cli` (clap args), `store` (redb peer DB), `crawler` (probing + scheduler), `dns` (hickory authoritative server), `web` (HTTP API for ad-hoc submissions / introspection / health / metrics), `dnsseeder` (binary wiring it all together, plus periodic stats dump).
+A Kaspa DNS seeder: it crawls the Kaspa P2P network, stores reachable peers, and serves a subset of them over an authoritative DNS zone so new nodes can bootstrap.
 
 ## Core mental model
 

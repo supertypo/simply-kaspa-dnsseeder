@@ -30,13 +30,11 @@ const SOA_EXPIRE: i32 = 604_800;
 const A_TTL_SECONDS: u32 = 30;
 const NS_TTL_SECONDS: u32 = 86_400;
 
-/// Validated query reduced to the fields needed to answer.
 struct QueryPlan {
     qtype: RecordType,
     qname: Name,
 }
 
-/// DNS response sections, ready to be wrapped in a header and sent.
 struct Answer {
     answers: Vec<Record>,
     ns: Vec<Record>,

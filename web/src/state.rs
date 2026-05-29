@@ -21,14 +21,12 @@ use simply_kaspa_dnsseeder_common::RateLimiter;
 
 const PEERS_CACHE_TTL: Duration = Duration::from_secs(5);
 
-/// Things handlers *use* to do work.
 #[derive(Clone)]
 pub struct RuntimeRefs {
     pub store: PeerStore,
     pub prober: Arc<dyn Prober>,
 }
 
-/// Things handlers *report*: metrics counters, host stats, lifecycle.
 #[derive(Clone)]
 pub struct ObservabilityCtx {
     pub metrics: Arc<WebMetrics>,
@@ -56,7 +54,7 @@ impl AppState {
     }
 }
 
-/// Builder used to construct [`AppState`] with optional observability overrides.
+/// Builder for [`AppState`] with optional observability overrides.
 pub struct AppStateBuilder {
     store: PeerStore,
     prober: Arc<dyn Prober>,

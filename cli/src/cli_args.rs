@@ -150,19 +150,16 @@ pub struct LoggingArgs {
 }
 
 impl CliArgs {
-    /// Build-time version string (from `vergen`).
     #[must_use]
     pub fn version() -> &'static str {
         env!("VERGEN_GIT_DESCRIBE")
     }
 
-    /// Build-time commit SHA (from `vergen`).
     #[must_use]
     pub fn commit_id() -> &'static str {
         env!("VERGEN_GIT_SHA")
     }
 
-    /// Returns true iff the DNS server should be started.
     #[must_use]
     pub fn dns_enabled(&self) -> bool {
         self.dns.dns_zone.is_some() && self.dns.dns_nameserver.is_some()

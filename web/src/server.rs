@@ -8,7 +8,7 @@ use crate::error::Error;
 use crate::router::build_router;
 use crate::state::AppState;
 
-/// Bind the HTTP server on `listen` and serve until `shutdown` fires.
+/// Run the HTTP server until shutdown.
 pub async fn run_web_server(state: AppState, mut shutdown: broadcast::Receiver<()>) -> Result<(), Error> {
     let listen = state.config.listen;
     let app = build_router(state).into_make_service_with_connect_info::<SocketAddr>();

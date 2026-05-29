@@ -2,7 +2,7 @@ use chrono::Utc;
 use std::net::IpAddr;
 use std::time::Duration;
 
-/// Current UTC time as unix milliseconds.
+/// Current time as unix milliseconds.
 #[must_use]
 pub fn now_ms() -> i64 {
     Utc::now().timestamp_millis()

@@ -17,7 +17,6 @@ use crate::metrics::CrawlerMetrics;
 use crate::model::{ProbeResult, is_acceptable_address, peer_record_from_version};
 use crate::probe::Probe;
 
-/// Probe a peer, record the outcome, and seed any advertised addresses as stubs.
 pub(crate) async fn probe_one(
     probe: &dyn Probe,
     store: &PeerStore,

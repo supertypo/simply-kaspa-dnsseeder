@@ -1,7 +1,5 @@
-//! Periodic stats dump: aggregates subsystem counters, a one-pass
-//! [`PeerStore`] summary, and process metadata. Counters persist to the store
-//! after every dump so totals survive restarts (worst case: last interval's
-//! increments are lost).
+//! Periodic stats dump. Subsystem counters persist across restarts (the last unflushed
+//! interval may be lost on crash).
 
 mod format;
 mod render;
@@ -22,7 +20,6 @@ use tokio::sync::broadcast;
 
 use self::render::{Block, render};
 
-/// Gathered metrics ready to render and persist. Pure data — no I/O.
 pub(super) struct MetricsReport {
     block: Block,
     now_ms: i64,
@@ -34,13 +31,12 @@ impl MetricsReport {
     }
 }
 
-/// Per-process knobs that turn a "good" peer into a "good and valid" one (i.e. one that the DNS /
-/// API surface would actually serve). Mirrors the relevant fields of `DnsConfig` / `WebConfig`.
+/// Snapshot of the DNS-serving filter knobs that distinguish a "good" peer from a "good and
+/// valid" one. Sourced from CLI flags at startup; mirrored from `DnsConfig` / `WebConfig`.
 #[derive(Clone, Default)]
 pub struct ValidityCriteria {
     pub min_protocol_version: Option<u32>,
     pub min_user_agent: Option<Version>,
-    /// `Some(port)` when `--strict-port` is set; `None` otherwise.
     pub strict_default_port: Option<u16>,
 }
 
@@ -75,7 +71,6 @@ impl Metrics {
     }
 
     /// Gather a snapshot of subsystem counters plus a one-pass store summary.
-    /// Returns `None` if the store summary cannot be fetched.
     fn snapshot(&self, store: &PeerStore) -> Option<MetricsReport> {
         let now = now_ms();
         let stale_good_ms = i64::try_from(self.stale_good.as_millis()).unwrap_or(i64::MAX);
@@ -111,7 +106,6 @@ impl Metrics {
         Some(MetricsReport { block, now_ms: now })
     }
 
-    /// Emit a single stats block and persist the snapshot.
     pub fn dump(&self, store: &PeerStore) {
         let Some(report) = self.snapshot(store) else { return };
         for line in report.render() {

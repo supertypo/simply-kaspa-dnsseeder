@@ -65,7 +65,7 @@ impl WorkerPool {
         Self { tx, in_flight, dispatcher }
     }
 
-    /// Try to enqueue an address for probing. Non-blocking.
+    /// Non-blocking enqueue.
     pub fn try_enqueue(&self, net: NetAddress) -> EnqueueOutcome {
         let addr = SocketAddr::new(net.ip, net.port);
         if !self.in_flight.insert(addr) {
@@ -84,7 +84,6 @@ impl WorkerPool {
         }
     }
 
-    /// Current number of addresses queued or in flight.
     pub fn in_flight_len(&self) -> usize {
         self.in_flight.len()
     }

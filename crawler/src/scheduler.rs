@@ -30,17 +30,15 @@ use crate::seeders::{Resolver, dns_seed_many};
 use crate::worker_pool::{EnqueueOutcome, WorkerCtx, WorkerPool};
 use simply_kaspa_dnsseeder_common::{duration_to_ms, now_ms};
 
-/// Pruning runs on this fixed cadence (matches Go dnsseeder).
+/// Pruning cadence (matches Go dnsseeder).
 const PRUNE_INTERVAL: Duration = Duration::from_mins(1);
-/// Per-host timeout for `--seeder` lookups. Mirrors the built-in DNS-seeder
-/// timeout so a single dead host can't stall bootstrap indefinitely.
+/// Per-host timeout for `--seeder` lookups so a single dead host can't stall bootstrap.
 const SEEDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
-/// Cadence at which the built-in DNS seeders are re-resolved so newly added
-/// entries percolate in without restarting the seeder. `--seeder` overrides
-/// are intentionally only used at bootstrap.
+/// Cadence at which the built-in DNS seeders are re-resolved so newly added entries percolate
+/// in without a restart.
 const SEEDER_REFRESH_INTERVAL: Duration = Duration::from_mins(10);
-/// Cap on the bulk peer-close at shutdown so hung remotes can't keep the
-/// process alive past Docker's SIGTERM grace.
+/// Cap on the bulk peer-close at shutdown so hung remotes can't keep the process alive past
+/// Docker's SIGTERM grace.
 const PROBE_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone)]
@@ -127,9 +125,15 @@ impl Scheduler {
         let mut prune_ticker = tokio::time::interval(PRUNE_INTERVAL);
         prune_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         prune_ticker.tick().await;
-        let mut seeder_ticker = tokio::time::interval(SEEDER_REFRESH_INTERVAL);
-        seeder_ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        seeder_ticker.tick().await;
+        let mut seeder_ticker = if self.config.seeders.is_empty() {
+            let mut t = tokio::time::interval(SEEDER_REFRESH_INTERVAL);
+            t.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            t.tick().await;
+            Some(t)
+        } else {
+            info!("crawler: --seeder set; periodic built-in DNS seeder refresh disabled");
+            None
+        };
 
         loop {
             tokio::select! {
@@ -149,7 +153,7 @@ impl Scheduler {
                 _ = prune_ticker.tick() => {
                     prune_once(&self.store, self.config.dead_after_ms(), self.config.dead_after).await;
                 }
-                _ = seeder_ticker.tick() => {
+                _ = async { seeder_ticker.as_mut().expect("guarded by is_some()").tick().await }, if seeder_ticker.is_some() => {
                     self.refresh_builtin_seeders().await;
                 }
             }
@@ -179,9 +183,8 @@ impl Scheduler {
         Ok(())
     }
 
-    /// Periodic re-resolution of the built-in DNS seeders. Always uses
-    /// `Params::dns_seeders` regardless of whether `--seeder` was set at
-    /// startup — `--seeder` is intentionally one-shot.
+    /// Periodic re-resolution of the built-in DNS seeders. Skipped entirely when `--seeder` is
+    /// set; explicit seeders are intentionally one-shot.
     async fn refresh_builtin_seeders(&self) {
         let addrs = dns_seed_many(self.config.network_id, self.resolver.clone()).await;
         let pulled = addrs.len();

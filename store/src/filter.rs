@@ -1,19 +1,12 @@
 use crate::record::PeerRecord;
 use semver::Version;
 
-/// Address family used for DNS filtering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Family {
     V4,
     V6,
 }
 
-/// Predicate over a [`PeerRecord`].
-///
-/// Used by both the HTTP and DNS surfaces; the HTTP surface typically passes
-/// `family = None`, `min_protocol_version = None`, `min_user_agent = None`,
-/// `default_port_only = false` and only sets `dead_after_ms`. The DNS surface
-/// fills all fields.
 #[derive(Debug, Clone)]
 pub struct Filter {
     pub now_ms: i64,
@@ -26,11 +19,8 @@ pub struct Filter {
 }
 
 impl Filter {
-    /// Build the standard "serve this peer to clients" filter shared by the
-    /// HTTP and DNS surfaces. Always enforces the stale-good window (which
-    /// also implicitly hides stubs) and skips the dead cutoff — `prune_dead`
-    /// removes those records out of band. Caller fills in `family` and
-    /// `default_port` per surface.
+    /// Standard "serve this peer to clients" filter. Sets `dead_after_ms = i64::MAX` because
+    /// `prune_dead` removes dead records out of band, and always enforces the stale-good window.
     #[must_use]
     pub fn serving(
         now_ms: i64,
@@ -51,7 +41,6 @@ impl Filter {
         }
     }
 
-    /// Returns true iff the record passes all configured criteria.
     #[must_use]
     pub fn matches(&self, rec: &PeerRecord) -> bool {
         if self.now_ms - rec.last_seen_ms > self.dead_after_ms {
@@ -71,6 +60,13 @@ impl Filter {
                 return false;
             }
         }
+        self.passes_validity(rec)
+    }
+
+    /// Validity subset of [`Self::matches`]: skips the staleness, dead-cutoff and family checks.
+    /// Exposed so aggregations like `PeerStore::summary` share one definition of "valid".
+    #[must_use]
+    pub fn passes_validity(&self, rec: &PeerRecord) -> bool {
         if let Some(min) = self.min_protocol_version
             && rec.protocol_version < min
         {

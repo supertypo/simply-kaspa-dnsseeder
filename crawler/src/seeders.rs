@@ -19,7 +19,7 @@ pub trait Resolver: Send + Sync {
     async fn lookup(&self, host: &str, port: u16) -> std::io::Result<Vec<SocketAddr>>;
 }
 
-/// Default resolver delegating to `tokio::net::lookup_host`.
+/// Tokio-based DNS resolver.
 pub struct TokioResolver;
 
 #[async_trait]
