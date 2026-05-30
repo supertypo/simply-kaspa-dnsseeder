@@ -488,10 +488,10 @@ pub fn is_eligible_for_probe(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, 
 }
 
 #[inline]
-fn good_probe_threshold(stale_good_ms: i64) -> i64 {
+const fn good_probe_threshold(stale_good_ms: i64) -> i64 {
     stale_good_ms * 4 / 5
 }
 
-fn is_incompatible_db(err: &redb::DatabaseError) -> bool {
+const fn is_incompatible_db(err: &redb::DatabaseError) -> bool {
     matches!(err, redb::DatabaseError::UpgradeRequired(_) | redb::DatabaseError::RepairAborted)
 }

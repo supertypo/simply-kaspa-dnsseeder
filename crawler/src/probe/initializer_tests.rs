@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use kaspa_p2p_lib::KaspadMessagePayloadType;
 
-use crate::probe_initializer::drain_payload_types;
+use crate::probe::initializer::drain_payload_types;
 
 /// Every variant of `KaspadMessagePayloadType` defined in the `rusty-kaspa`
 /// version we depend on. If this list ever diverges from the upstream enum,

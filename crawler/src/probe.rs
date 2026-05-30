@@ -11,7 +11,15 @@ use tokio::sync::oneshot;
 
 use crate::error::ProbeError;
 use crate::model::ProbeResult;
-use crate::probe_initializer::{PendingMap, ProbeInitializer, ProbeInitializerConfig};
+use crate::probe::initializer::{PendingMap, ProbeInitializer, ProbeInitializerConfig};
+
+pub mod initializer;
+pub mod runner;
+
+#[cfg(test)]
+mod initializer_tests;
+#[cfg(test)]
+mod tests;
 
 // Bound on the post-probe peer shutdown so a hung peer can't stall the caller.
 const TERMINATE_GRACE: Duration = Duration::from_secs(2);

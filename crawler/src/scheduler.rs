@@ -7,7 +7,7 @@
 //! * Run the prune ticker.
 //! * Propagate shutdown to the worker pool and probe backend.
 //!
-//! Probe execution lives in [`crate::probe_runner`]; the concurrent worker
+//! Probe execution lives in [`crate::probe::runner`]; the concurrent worker
 //! pool lives in [`crate::worker_pool`].
 
 use std::net::SocketAddr;
@@ -25,7 +25,7 @@ use crate::error::Error;
 use crate::metrics::CrawlerMetrics;
 use crate::model::is_acceptable_address;
 use crate::probe::Probe;
-use crate::probe_runner::net_from;
+use crate::probe::runner::net_from;
 use crate::seeders::{Resolver, dns_seed_many};
 use crate::worker_pool::{EnqueueOutcome, WorkerCtx, WorkerPool};
 use simply_kaspa_dnsseeder_common::{duration_to_ms, now_ms};

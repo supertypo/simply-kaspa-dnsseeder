@@ -3,6 +3,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+pub mod api;
+
+pub(crate) use api::ApiError;
+
 #[derive(Debug, Clone, Copy)]
 pub enum TlsFile {
     Cert,

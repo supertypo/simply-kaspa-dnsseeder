@@ -7,8 +7,8 @@ use std::net::IpAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-/// Sweep stale buckets every N successful `check` calls. O(buckets) but
-/// sharded across DashMap stripes.
+/// Sweep stale buckets every N successful `check` calls. `O(buckets)` but
+/// sharded across `DashMap` stripes.
 const SWEEP_INTERVAL: u64 = 1024;
 
 #[derive(Debug)]
@@ -85,13 +85,13 @@ impl RateLimiter {
 
     /// Configured per-window token capacity. `0` means the limiter is disabled.
     #[must_use]
-    pub fn capacity(&self) -> u32 {
+    pub const fn capacity(&self) -> u32 {
         self.capacity
     }
 
     /// Configured refill window.
     #[must_use]
-    pub fn window(&self) -> Duration {
+    pub const fn window(&self) -> Duration {
         self.window
     }
 

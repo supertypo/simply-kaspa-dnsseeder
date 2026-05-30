@@ -14,9 +14,9 @@ use tokio::sync::RwLock;
 
 use crate::config::WebConfig;
 use crate::metrics::WebMetrics;
-use crate::metrics_source::{MetricsSource, NullMetricsSource};
-use crate::peers_cache::PeersCache;
-use crate::prober::Prober;
+use crate::metrics::{MetricsSource, NullMetricsSource};
+use crate::runtime::PeersCache;
+use crate::runtime::Prober;
 use simply_kaspa_dnsseeder_common::RateLimiter;
 
 const PEERS_CACHE_TTL: Duration = Duration::from_secs(5);

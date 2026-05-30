@@ -17,7 +17,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::metrics::CrawlerMetrics;
 use crate::probe::Probe;
-use crate::probe_runner::probe_one;
+use crate::probe::runner::probe_one;
 
 /// Probe queue depth per worker. Bounds how many ready peers can sit waiting
 /// for a worker before the producer back-pressures via `try_send`.

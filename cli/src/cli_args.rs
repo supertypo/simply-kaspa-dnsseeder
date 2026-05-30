@@ -160,17 +160,17 @@ pub struct LoggingArgs {
 
 impl CliArgs {
     #[must_use]
-    pub fn version() -> &'static str {
+    pub const fn version() -> &'static str {
         env!("VERGEN_GIT_DESCRIBE")
     }
 
     #[must_use]
-    pub fn commit_id() -> &'static str {
+    pub const fn commit_id() -> &'static str {
         env!("VERGEN_GIT_SHA")
     }
 
     #[must_use]
-    pub fn dns_enabled(&self) -> bool {
+    pub const fn dns_enabled(&self) -> bool {
         self.dns.dns_zone.is_some() && self.dns.dns_nameserver.is_some()
     }
 

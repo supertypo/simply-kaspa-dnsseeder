@@ -46,8 +46,8 @@ async fn run(cli: CliArgs) -> Result<()> {
 
     let datadir = prepare_datadir(&cli.datadir, network_id).await?;
     let store_path = datadir.join("peers.redb");
-    let store = PeerStore::open(&store_path).with_context(|| format!("opening store at {store_path:?}"))?;
-    info!("store: persistence at {store_path:?}");
+    let store = PeerStore::open(&store_path).with_context(|| format!("opening store at {}", store_path.display()))?;
+    info!("store: persistence at {}", store_path.display());
 
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     spawn_signal_handler(shutdown_tx.clone());
@@ -201,7 +201,7 @@ async fn prepare_datadir(raw: &str, network_id: NetworkId) -> Result<PathBuf> {
     };
     tokio::fs::create_dir_all(&dir)
         .await
-        .with_context(|| format!("creating datadir {dir:?}"))?;
+        .with_context(|| format!("creating datadir {}", dir.display()))?;
     Ok(dir)
 }
 

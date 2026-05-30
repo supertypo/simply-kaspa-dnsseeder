@@ -52,7 +52,7 @@ fn cgroup_free_memory() -> Option<u64> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn cgroup_free_memory() -> Option<u64> {
+const fn cgroup_free_memory() -> Option<u64> {
     None
 }
 

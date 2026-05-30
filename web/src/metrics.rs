@@ -2,6 +2,10 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub mod source;
+
+pub use source::{MetricsSource, NullMetricsSource};
+
 #[derive(Debug, Default)]
 pub struct WebMetrics {
     pub requests: AtomicU64,
@@ -82,7 +86,7 @@ pub enum PostRejection {
 }
 
 impl PostRejection {
-    fn counter(self, m: &WebMetrics) -> &AtomicU64 {
+    const fn counter(self, m: &WebMetrics) -> &AtomicU64 {
         match self {
             Self::Auth => &m.post_rejected_auth,
             Self::RateLimit => &m.post_rejected_ratelimit,

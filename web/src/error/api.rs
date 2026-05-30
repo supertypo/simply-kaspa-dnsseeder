@@ -15,7 +15,7 @@ pub(crate) enum ApiError {
 }
 
 impl ApiError {
-    fn status(&self) -> StatusCode {
+    const fn status(&self) -> StatusCode {
         match self {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
@@ -26,7 +26,7 @@ impl ApiError {
         }
     }
 
-    fn message(&self) -> &str {
+    const fn message(&self) -> &str {
         match self {
             Self::BadRequest(m)
             | Self::NotFound(m)

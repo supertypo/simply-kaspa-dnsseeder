@@ -20,7 +20,7 @@ pub struct SchedulerProber {
 
 impl SchedulerProber {
     #[must_use]
-    pub fn new(probe: std::sync::Arc<KaspadProbe>, store: PeerStore) -> Self {
+    pub const fn new(probe: std::sync::Arc<KaspadProbe>, store: PeerStore) -> Self {
         Self { probe, store }
     }
 }

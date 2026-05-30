@@ -5,7 +5,7 @@ use kaspa_consensus_core::network::{NetworkId, NetworkType};
 use tokio::net::TcpListener;
 
 use crate::probe::{KaspadProbe, Probe};
-use crate::probe_initializer::ProbeInitializerConfig;
+use crate::probe::initializer::ProbeInitializerConfig;
 
 /// Bind a listener that accepts but never speaks h2 — the gRPC client hangs
 /// past `probe_timeout`, forcing the timeout-and-cleanup path.

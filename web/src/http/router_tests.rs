@@ -11,7 +11,7 @@ use simply_kaspa_dnsseeder_store::{NetAddress, PeerRecord, PeerStore};
 use tempfile::TempDir;
 use tower::{Service, ServiceExt};
 
-use crate::prober::Prober;
+use crate::runtime::Prober;
 use crate::{AppState, WebConfig, build_router};
 
 #[derive(Default, Clone)]

@@ -37,7 +37,7 @@ pub struct ProbeInitializerConfig {
 
 impl ProbeInitializerConfig {
     #[must_use]
-    pub fn new(network_id: kaspa_consensus_core::network::NetworkId, probe_timeout: Duration, probes_per_peer: u8) -> Self {
+    pub const fn new(network_id: kaspa_consensus_core::network::NetworkId, probe_timeout: Duration, probes_per_peer: u8) -> Self {
         Self {
             network_id,
             probe_timeout,
@@ -53,7 +53,7 @@ pub struct ProbeInitializer {
 
 impl ProbeInitializer {
     #[must_use]
-    pub fn new(config: ProbeInitializerConfig, pending: PendingMap) -> Self {
+    pub const fn new(config: ProbeInitializerConfig, pending: PendingMap) -> Self {
         Self { config, pending }
     }
 

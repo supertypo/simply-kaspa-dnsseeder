@@ -75,11 +75,11 @@ fn opt_string(s: &str) -> Option<String> {
     if s.is_empty() { None } else { Some(s.to_string()) }
 }
 
-fn opt_protocol(v: u32) -> Option<u32> {
+const fn opt_protocol(v: u32) -> Option<u32> {
     if v == 0 { None } else { Some(v) }
 }
 
-fn opt_ms(ms: i64) -> Option<i64> {
+const fn opt_ms(ms: i64) -> Option<i64> {
     if ms > 0 { Some(ms) } else { None }
 }
 

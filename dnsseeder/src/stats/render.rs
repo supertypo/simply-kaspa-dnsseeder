@@ -9,7 +9,7 @@ use simply_kaspa_dnsseeder_web::WebSnapshot;
 
 use super::format::{count, uptime};
 
-const RULE_TOP: &str = "=========================================================================================================";
+const RULE_TOP_END: &str = "=========================================================================================================";
 const RULE_MID: &str = "  ---------------------------------------------------------------------------------------------------";
 
 pub(super) struct Block {
@@ -29,7 +29,7 @@ pub(super) struct Block {
 
 pub(super) fn render(b: &Block) -> Vec<String> {
     let mut out = Vec::with_capacity(16);
-    out.push(RULE_TOP.to_string());
+    out.push(RULE_TOP_END.to_string());
     out.push(row(
         "node",
         "up",
@@ -97,7 +97,7 @@ pub(super) fn render(b: &Block) -> Vec<String> {
         "rejected",
         &count(b.web.rejected),
     ));
-    out.push(RULE_TOP.to_string());
+    out.push(RULE_TOP_END.to_string());
     out
 }
 

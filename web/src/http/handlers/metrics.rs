@@ -9,12 +9,12 @@ use log::warn;
 use simply_kaspa_dnsseeder_common::{duration_to_ms, now_ms};
 use simply_kaspa_dnsseeder_store::Filter;
 
-use crate::api_error::ApiError;
+use crate::error::ApiError;
 use crate::dto::{
     MetricsResponse, PeerCounts, PeerFamilyCounts, PeerStatusCounts, PostRejected, RateLimiterSubsystem, ServiceInfo, WebSubsystem,
 };
 use crate::state::AppState;
-use crate::system::{collect_disk, collect_process};
+use crate::runtime::system::{collect_disk, collect_process};
 
 pub(crate) const PATH: &str = "/metrics";
 

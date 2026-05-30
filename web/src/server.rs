@@ -10,7 +10,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinSet;
 
 use crate::error::{Error, TlsFile};
-use crate::router::build_router;
+use crate::http::build_router;
 use crate::state::AppState;
 
 const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);

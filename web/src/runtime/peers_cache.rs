@@ -25,7 +25,7 @@ pub struct PeersCache {
 
 impl PeersCache {
     #[must_use]
-    pub fn new(ttl: Duration) -> Self {
+    pub const fn new(ttl: Duration) -> Self {
         Self {
             ttl,
             entries: Mutex::new(Vec::new()),

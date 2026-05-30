@@ -139,7 +139,7 @@ mod probe_one_fanout {
     use crate::error::ProbeError;
     use crate::model::ProbeResult;
     use crate::probe::Probe;
-    use crate::probe_runner::{probe_and_store, probe_one};
+    use crate::probe::runner::{probe_and_store, probe_one};
 
     const DEFAULT_PORT: u16 = 16111;
 
