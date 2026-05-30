@@ -21,6 +21,7 @@ use crate::dto::{
         crate::handlers::peers::list,
         crate::handlers::peers::get,
         crate::handlers::peers::submit,
+        crate::handlers::peers::delete,
     ),
     components(schemas(
         ApiErrorBody,

@@ -46,7 +46,7 @@ pub fn build_router(state: AppState) -> Router {
 
     let gated = Router::new()
         .route(&p("/peers"), post(peers::submit))
-        .route(&p("/peers/{addr_port}"), get(peers::get))
+        .route(&p("/peers/{addr_port}"), get(peers::get).delete(peers::delete))
         .route_layer(from_fn_with_state(auth_state, require_api_key));
 
     let open = Router::new()
@@ -78,7 +78,9 @@ pub fn build_router(state: AppState) -> Router {
 }
 
 fn build_cors(allowed_origins: &[String]) -> CorsLayer {
-    let base = CorsLayer::new().allow_methods([Method::GET, Method::POST]).allow_headers(Any);
+    let base = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::DELETE])
+        .allow_headers(Any);
     if allowed_origins.is_empty() {
         return base.allow_origin(Any);
     }

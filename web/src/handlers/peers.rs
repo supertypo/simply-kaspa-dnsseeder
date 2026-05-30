@@ -51,6 +51,7 @@ fn list_filter(cfg: &WebConfig, all: bool) -> Filter {
 pub(crate) const LIST_PATH: &str = "/peers";
 pub(crate) const GET_PATH: &str = "/peers/{addr_port}";
 pub(crate) const SUBMIT_PATH: &str = "/peers";
+pub(crate) const DELETE_PATH: &str = "/peers/{addr_port}";
 
 #[utoipa::path(
     get,
@@ -218,6 +219,42 @@ pub(crate) async fn submit(
             state.obs.metrics.record_post_rejection(PostRejection::Probe);
             debug!("web: POST /peers probe of {addr} failed: {err}");
             ApiError::BadGateway("probe failed").into_response()
+        }
+    }
+}
+
+#[utoipa::path(
+    delete,
+    path = DELETE_PATH,
+    tag = "peers",
+    params(
+        ("addr_port" = String, Path, description = "Peer address as ip:port (IPv6 wrapped in brackets, e.g. [::1]:16111)"),
+    ),
+    responses(
+        (status = 204, description = "Peer removed"),
+        (status = 400, description = "Bad address"),
+        (status = 401, description = "Missing or invalid X-API-KEY"),
+        (status = 404, description = "Peer not found"),
+    ),
+    security(("api_key" = [])),
+)]
+pub(crate) async fn delete(State(state): State<AppState>, Path(addr_port): Path<String>) -> Response {
+    let Ok(addr) = SocketAddr::from_str(addr_port.trim()) else {
+        return ApiError::BadRequest("addr must be ip:port").into_response();
+    };
+    let net = NetAddress {
+        ip: canonicalize_ip(addr.ip()),
+        port: addr.port(),
+    };
+    match state.runtime.store.blocking(move |s| s.delete(&net)).await {
+        Ok(true) => {
+            debug!("web: DELETE /peers/{addr_port} removed");
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Ok(false) => ApiError::NotFound("peer not found").into_response(),
+        Err(err) => {
+            warn!("web: DELETE /peers/<addr> store error: {err}");
+            ApiError::Internal("store error").into_response()
         }
     }
 }
