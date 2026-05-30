@@ -12,12 +12,12 @@ use serde::Deserialize;
 use simply_kaspa_dnsseeder_crawler::is_acceptable_address;
 use simply_kaspa_dnsseeder_store::{Filter, NetAddress};
 
-use crate::error::ApiError;
-use crate::http::auth::authenticated;
 use crate::config::WebConfig;
 use crate::dto::{PeerDto, SubmitPeerRequest};
-use crate::metrics::PostRejection;
+use crate::error::ApiError;
+use crate::http::auth::authenticated;
 use crate::http::request::client_ip;
+use crate::metrics::PostRejection;
 use crate::state::AppState;
 use simply_kaspa_dnsseeder_common::{RateLimiter, canonicalize_ip, duration_to_ms, now_ms};
 

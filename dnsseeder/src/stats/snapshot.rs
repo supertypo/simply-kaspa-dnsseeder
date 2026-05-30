@@ -176,7 +176,6 @@ pub(super) fn load(store: &PeerStore, crawler: &CrawlerMetrics, dns: &DnsMetrics
     debug!("stats: restored snapshot persisted at {}", snap.persisted_at_ms);
 }
 
-
 pub(super) fn save(store: &PeerStore, crawler: &CrawlerSnapshot, dns: &DnsSnapshot, web: &WebSnapshot, now_ms: i64) {
     let snap = MetricsSnapshot::build(crawler, dns, web, now_ms);
     let bytes = match codec::encode(&snap) {
