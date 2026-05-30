@@ -525,3 +525,93 @@ async fn responses_have_default_cache_control() {
         Some("public, max-age=5")
     );
 }
+
+#[tokio::test]
+async fn delete_peer_requires_api_key() {
+    let (_temp, store) = seeded_store();
+    let state = make_state(Arc::new(MockProber::default()), store, "secret");
+    let app = build_router(state);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/peers/1.2.3.4:16111")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn delete_peer_removes_existing() {
+    let (_temp, store) = seeded_store();
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
+    let app = build_router(state);
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/peers/1.2.3.4:16111")
+                .header("x-api-key", "test-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+
+    // Subsequent GET should now report not-found.
+    let res = app
+        .oneshot(
+            Request::get("/peers/1.2.3.4:16111")
+                .header("x-api-key", "test-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_peer_returns_404_when_missing() {
+    let temp = TempDir::new().unwrap();
+    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
+    let app = build_router(state);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/peers/9.9.9.9:16111")
+                .header("x-api-key", "test-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn delete_peer_returns_400_on_bad_addr() {
+    let temp = TempDir::new().unwrap();
+    let store = PeerStore::open(temp.path().join("peers.redb")).unwrap();
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
+    let app = build_router(state);
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method(Method::DELETE)
+                .uri("/peers/not-an-addr")
+                .header("x-api-key", "test-key")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
