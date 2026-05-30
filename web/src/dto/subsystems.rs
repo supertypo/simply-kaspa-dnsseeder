@@ -1,5 +1,5 @@
 //! Subsystem-specific metric shapes contributed by the binary via
-//! [`MetricsSource`](crate::metrics_source::MetricsSource). Each value lives
+//! [`MetricsSource`](crate::metrics::source::MetricsSource). Each value lives
 //! under a named key in `MetricsResponse::subsystems`.
 
 use serde::Serialize;

@@ -1,4 +1,4 @@
-//! Peer-related handlers: list, lookup, submit.
+//! Peer-related handlers: list, lookup, submit, delete.
 
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;

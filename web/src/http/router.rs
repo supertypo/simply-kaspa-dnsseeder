@@ -1,6 +1,6 @@
 //! Axum router assembly.
 //!
-//! Handlers live in [`crate::handlers`]; this module only wires routes,
+//! Handlers live in [`crate::http::handlers`]; this module only wires routes,
 //! applies request-counter and api-key middleware, the optional
 //! `--api-prefix`, and Swagger UI / `OpenAPI` docs.
 

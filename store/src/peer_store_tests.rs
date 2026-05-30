@@ -220,7 +220,7 @@ fn summary_v4_v6_counts_only_good_subset() {
     for r in [&r1, &r2, &r3, &r4, &r6] {
         store.upsert(r).unwrap();
     }
-    // stale_good = 200 → success_ms in (now-200 ..= now) is "good".
+    // Within stale_good window.
     let s = store.summary(600, 200, None).unwrap();
     assert_eq!(s.total, 5);
     assert_eq!(s.good, 3, "good = 2 v4 + 1 v6 within window (no validity filter)");
@@ -242,7 +242,7 @@ fn summary_splits_good_into_valid_and_filtered_with_min_user_agent() {
     let mut old_peer = make_rec(2, Ipv4Addr::new(10, 0, 0, 2), 16111, 500);
     old_peer.last_success_ms = 500;
     old_peer.user_agent = "/kaspad:1.0.0/".into();
-    // Stub (never attempted, never succeeded) \u2014 must not show up in `failed`.
+    // Stub (never attempted, never succeeded) — must not show up in `failed`.
     let mut stub = make_rec(3, Ipv4Addr::new(10, 0, 0, 3), 16111, 500);
     stub.last_attempt_ms = 0;
     stub.last_success_ms = 0;
@@ -271,8 +271,7 @@ fn due_for_probe_returns_oldest_first_and_respects_max() {
         store.upsert(&r).unwrap();
         recs.push(r);
     }
-    // now=10_000, stale_good=100 → eligible iff last_attempt_ms <= 9_900.
-    // All five qualify; ordering should be ascending by last_attempt_ms: 10, 30, 50, 70, 100.
+    // All eligible; expect ascending order by last_attempt_ms, truncated to max.
     let out = store.due_for_probe(10_000, 100, 1_000, 0, 3).unwrap();
     assert_eq!(out.len(), 3);
     assert_eq!(out[0].last_attempt_ms, 10);
@@ -291,7 +290,7 @@ fn due_for_probe_stops_at_threshold() {
     r_recent.last_success_ms = 990;
     store.upsert(&r_old).unwrap();
     store.upsert(&r_recent).unwrap();
-    // now=1_000, stale_good=100 → recent (since_attempt=10) cannot be eligible.
+    // Recent peer (since_attempt < stale_good) must not be returned.
     let out = store.due_for_probe(1_000, 100, 500, 0, 10).unwrap();
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].address.ip, IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)));
@@ -300,12 +299,12 @@ fn due_for_probe_stops_at_threshold() {
 #[test]
 fn due_for_probe_filters_bad_class_within_stale_bad_window() {
     let (_dir, store) = open_temp_store();
-    // Bad-class (never succeeded), attempted 200ms ago.
+    // Bad-class (never succeeded), attempted within the stale_bad window.
     let mut r = make_rec(1, Ipv4Addr::new(1, 1, 1, 1), 16111, 1_000);
     r.last_attempt_ms = 800;
     r.last_success_ms = 0;
     store.upsert(&r).unwrap();
-    // stale_good=100, stale_bad=500, now=1_000 → since_attempt=200, threshold=500 → NOT eligible.
+    // Bad-class peer within stale_bad window must not be eligible.
     let out = store.due_for_probe(1_000, 100, 500, 0, 10).unwrap();
     assert!(out.is_empty(), "bad-class peer still inside stale_bad window must not be returned");
 }
@@ -317,7 +316,7 @@ fn good_class_eligible_at_80_percent_of_stale_good() {
     r.last_attempt_ms = 0;
     r.last_success_ms = 1; // good class
     store.upsert(&r).unwrap();
-    // stale_good=100, threshold=80. since_attempt=79 → NOT eligible; 80 → eligible.
+    // Eligibility crosses the 80%-of-stale_good boundary.
     let just_before = store.due_for_probe(79, 100, 500, 0, 10).unwrap();
     assert!(just_before.is_empty(), "good peer must not be re-probed before 80% of stale_good");
     let at_threshold = store.due_for_probe(80, 100, 500, 0, 10).unwrap();
@@ -331,18 +330,18 @@ fn record_attempt_updates_index_position() {
         ip: IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1)),
         port: 16111,
     };
-    // Initial insert via record_attempt at t=0.
+    // Initial insert via record_attempt.
     store.record_attempt(&net, 0).unwrap();
     // Promote to good class so future eligibility is based on stale_good only.
     let mut rec = store.get(&net).unwrap().unwrap();
     rec.last_success_ms = 0; // keep bad class for simplicity
     store.upsert(&rec).unwrap();
-    // At now=10_000, attempt was at 0, since_attempt=10_000 ≥ stale_bad=500 → eligible.
+    // since_attempt ≥ stale_bad → eligible.
     let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();
     assert_eq!(due.len(), 1);
     // Bump attempt forward; should drop out of the most-overdue window.
     store.record_attempt(&net, 9_950).unwrap();
-    // Now since_attempt=50, below stale_good=100 → no longer eligible for any class.
+    // since_attempt now below stale_good → no longer eligible.
     let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();
     assert!(due.is_empty(), "peer should disappear from due list after attempt bump");
 }
@@ -355,7 +354,7 @@ fn delete_removes_attempt_index_entry() {
         port: 16111,
     };
     store.insert_stub_if_missing(&net, 0).unwrap();
-    // Stub has last_attempt_ms=0 and is bad-class → eligible when since_attempt ≥ stale_bad.
+    // Stub is bad-class → eligible once since_attempt ≥ stale_bad.
     let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();
     assert_eq!(due.len(), 1);
     assert!(store.delete(&net).unwrap());

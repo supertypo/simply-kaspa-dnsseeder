@@ -362,21 +362,21 @@ mod is_eligible {
 
     #[test]
     fn bad_recent_not_eligible() {
-        // never succeeded; last attempt 30min ago — under stale_bad threshold
+        // never succeeded; last attempt under stale_bad threshold
         let r = rec(NOW - 1_800_000, 0, NOW - 2_000_000, 0);
         assert!(!is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
     }
 
     #[test]
     fn bad_stale_eligible() {
-        // never succeeded; last attempt 3h ago — past stale_bad
+        // never succeeded; last attempt past stale_bad
         let r = rec(NOW - BAD - 1, 0, NOW - BAD - 1, 0);
         assert!(is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
     }
 
     #[test]
     fn never_attempted_stub_eligible() {
-        // brand-new stub: last_attempt=0, last_success=0; bad threshold applies
+        // brand-new stub: bad-class threshold applies
         let r = rec(0, 0, NOW - 60_000, NOW - 60_000);
         assert!(is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
     }

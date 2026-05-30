@@ -4,11 +4,11 @@ A DNS seeder for the [Kaspa](https://kaspa.org) network, written in Rust.
 
 It continuously crawls reachable Kaspa nodes, stores the good ones, and answers `A` / `AAAA` queries on a domain you control so fresh nodes can bootstrap into the network without hard-coded peer lists.
 
-A Rust reimplementation of the venerable Go [`dnsseeder`](https://github.com/kaspanet/dnsseeder), with a small HTTP API on the side for ad-hoc peer submissions and introspection.
+A small HTTP API on the side allows ad-hoc peer submissions and introspection.
 
 ## Build
 
-Requires Rust 1.93+ (see `rust-toolchain.toml`).
+Requires the Rust toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.toml).
 
 ```bash
 cargo build --release
@@ -39,20 +39,20 @@ That's the whole minimum: network, zone, nameserver FQDN, where to listen for DN
 
 - DNS server activates only when both `--dns-zone` and `--dns-nameserver` are set.
 - Binding port 53 typically needs `sudo` or `CAP_NET_BIND_SERVICE`.
-- With `--api-key` set, `POST /api/peers` requires the key (`Authorization: Bearer <key>` or `X-Api-Key: <key>`) and `GET /api/peers` only includes the raw `ip` field when the request is authenticated.
+- When `--api-key` is set, every write endpoint and every per-peer lookup requires the `X-API-KEY: <key>` request header. `GET /api/peers` is always public but only includes the raw `ip` field for authenticated callers.
 
 ### HTTP endpoints
 
-All HTTP endpoints are served under the `--api-prefix` (default `/api`); pass `--api-prefix ""` to serve at the root.
+All HTTP endpoints are served under the `--api-prefix` (default per `--help`); pass `--api-prefix ""` to serve at the root. Swagger UI is mounted at the prefix root (or `/swagger` when the prefix is empty).
 
-| Endpoint | Method | Description |
-| --- | --- | --- |
-| `/api/ping` | GET | Liveness; returns `pong` |
-| `/api/health` | GET | `200 OK` while at least one peer succeeded inside `--stale-good`, otherwise `503` |
-| `/api/metrics` | GET | JSON dump: process (cpu/mem), disk usage, peer-store summary, per-subsystem counters |
-| `/api/peers` | GET | All peers as JSON, sorted by most-recent success first |
-| `/api/peers` | POST | JSON body `{ "addrPort": "ip:port" }`; probes the peer and stores it on success (rate-limited, may need API key) |
-| `/api/peers/{ip:port}` | GET | Single peer lookup |
+| Endpoint | Method | Auth | Description |
+| --- | --- | --- | --- |
+| `/api/health` | GET | — | `200 OK` while at least one peer succeeded inside `--stale-good`, otherwise `503` |
+| `/api/metrics` | GET | — | JSON dump: process (cpu/mem), disk usage, peer-store summary, per-subsystem counters |
+| `/api/peers` | GET | — | All peers as JSON, sorted by most-recent success first. `ip` is omitted unless authenticated |
+| `/api/peers` | POST | required | JSON body `{ "addrPort": "ip:port" }`; probes the peer and stores it on success (rate-limited per source IP) |
+| `/api/peers/{addr_port}` | GET | required | Single peer lookup. IPv6 must be bracketed, e.g. `[::1]:<port>` |
+| `/api/peers/{addr_port}` | DELETE | required | Remove a peer from the store. Returns `204` on success, `404` if absent |
 
 ### Mainnet example
 
@@ -69,21 +69,21 @@ simply-kaspa-dnsseeder \
 
 ### Useful tuning flags
 
-| Flag | Default | Purpose |
-| --- | --- | --- |
-| `--threads` | `8` | Concurrent probe workers |
-| `--probes-per-peer` | `3` | Back-to-back `RequestAddresses` rounds per healthy probe (1..=10) |
-| `--probe-tick` | `10s` | How often the crawler scans for eligible peers |
-| `--stale-good` | `30m` | Re-probe interval for known-good peers (and DNS freshness window) |
-| `--stale-bad` | `2h` | Re-probe interval for peers that have never succeeded |
-| `--dead-after` | `7d` | Peers not seen for this long are pruned |
-| `--min-protocol-version` | _unset_ | Filter DNS answers by minimum protocol version |
-| `--min-user-agent` | _unset_ | Filter DNS answers by minimum kaspad semver (e.g. `1.1.0`) |
-| `--datadir` | `data` | Persistent storage directory |
-| `--api-prefix` | `/api` | URL prefix for HTTP endpoints (`""` serves at root) |
-| `--stats-interval` | `1m` | Periodic in-process stats dump cadence; `0s` disables |
+| Flag | Purpose |
+| --- | --- |
+| `--threads` | Concurrent probe workers |
+| `--probes-per-peer` | Back-to-back `RequestAddresses` rounds per healthy probe |
+| `--probe-tick` | How often the crawler scans for eligible peers |
+| `--stale-good` | Re-probe interval for known-good peers (and DNS freshness window) |
+| `--stale-bad` | Re-probe interval for peers that have never succeeded |
+| `--dead-after` | Peers not seen for this long are pruned |
+| `--min-protocol-version` | Filter DNS answers by minimum protocol version |
+| `--min-user-agent` | Filter DNS answers by minimum kaspad semver |
+| `--datadir` | Persistent storage directory |
+| `--api-prefix` | URL prefix for HTTP endpoints (`""` serves at root) |
+| `--stats-interval` | Periodic in-process stats dump cadence; `0s` disables |
 
-Run `simply-kaspa-dnsseeder --help` for the full list.
+Run `simply-kaspa-dnsseeder --help` for current defaults and the full list.
 
 ## TLS / HTTPS
 

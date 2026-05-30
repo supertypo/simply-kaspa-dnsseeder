@@ -112,8 +112,8 @@ impl ProbeInitializer {
         let _verack: VerackMessage = dequeue_with_timeout!(verack_route, Payload::Verack, timeout)?;
         router.enqueue(make_message!(Payload::Verack, pb::VerackMessage {})).await?;
 
-        // kaspa-p2p-lib peers send Ready and wait for ours (8s peer-side timeout)
-        // before they will service any further messages.
+        // kaspa-p2p-lib peers send Ready and wait for ours before they will
+        // service any further messages.
         router.enqueue(make_message!(Payload::Ready, ReadyMessage {})).await?;
         let _ready: ReadyMessage = dequeue_with_timeout!(ready_route, Payload::Ready, timeout)?;
 
@@ -125,7 +125,7 @@ impl ProbeInitializer {
         let address_list = self.collect_addresses(router, &mut addresses_route, timeout).await?;
         trace!("crawler: probe {}: addresses = {:?}", router.net_address(), address_list);
 
-        // Pre-empt the peer's 120s PingFlow timeout; `DUPLICATE_CONNECTION` is mapped to `IgnorableReject` on the remote.
+        // Pre-empt the peer's PingFlow timeout; `DUPLICATE_CONNECTION` is mapped to `IgnorableReject` on the remote.
         router
             .enqueue(make_message!(
                 Payload::Reject,
