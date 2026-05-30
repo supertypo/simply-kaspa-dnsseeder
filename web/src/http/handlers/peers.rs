@@ -27,20 +27,21 @@ const MAX_LIST_RESPONSE: usize = 1000;
 
 #[derive(Debug, Deserialize, Default)]
 pub(crate) struct ListQuery {
-    /// Skip protocol-version and user-agent filters when true; freshness and
-    /// stub exclusion still apply.
+    /// When true, bypass the stale-good window plus the protocol-version and
+    /// user-agent filters: return every peer that has succeeded at least once
+    /// and has not yet been pruned. Stubs are still excluded.
     #[serde(default)]
     all: bool,
 }
 
-/// Build the filter used by `GET /peers` and `GET /peers/{addr_port}`. Always
-/// enforces the stale-good window (which also implicitly hides stubs, since
-/// stubs have `last_success_ms = 0`). When `all` is false, also enforces the
-/// configured protocol-version and user-agent floors, matching the DNS path.
+/// Build the filter used by `GET /peers` and `GET /peers/{addr_port}`. When
+/// `all` is false, mirrors the DNS-serving filter (stale-good window plus the
+/// configured protocol-version and user-agent floors). When `all` is true,
+/// drops all three; stub exclusion is enforced separately by the caller.
 fn list_filter(cfg: &WebConfig, all: bool) -> Filter {
     Filter::serving(
         now_ms(),
-        duration_to_ms(cfg.stale_good),
+        if all { i64::MAX } else { duration_to_ms(cfg.stale_good) },
         if all { None } else { cfg.min_protocol_version },
         if all { None } else { cfg.min_user_agent.clone() },
         None,
@@ -58,7 +59,7 @@ pub(crate) const DELETE_PATH: &str = "/peers/{addr_port}";
     path = LIST_PATH,
     tag = "peers",
     params(
-        ("all" = Option<bool>, Query, description = "Bypass protocol-version and user-agent filters"),
+        ("all" = Option<bool>, Query, description = "Bypass stale-good window plus protocol-version and user-agent filters; stubs still excluded"),
     ),
     responses(
         (status = 200, description = "List of peers (IPs stripped without valid X-API-KEY)", body = [PeerDto]),
@@ -89,6 +90,9 @@ async fn compute_list_body(state: AppState, all: bool, expose: bool) -> Result<a
             warn!("web: GET /peers store error: {err}");
             ApiError::Internal("store error")
         })?;
+    if all {
+        records.retain(|r| r.last_success_ms > 0);
+    }
     records.sort_by_key(|r| std::cmp::Reverse(r.last_success_ms));
     if records.len() > MAX_LIST_RESPONSE {
         records.truncate(MAX_LIST_RESPONSE);
@@ -106,7 +110,7 @@ async fn compute_list_body(state: AppState, all: bool, expose: bool) -> Result<a
     tag = "peers",
     params(
         ("addr_port" = String, Path, description = "Peer address as ip:port (IPv6 wrapped in brackets, e.g. [::1]:16111)"),
-        ("all" = Option<bool>, Query, description = "Bypass protocol-version and user-agent filters"),
+        ("all" = Option<bool>, Query, description = "Bypass stale-good window plus protocol-version and user-agent filters; stubs still excluded"),
     ),
     responses(
         (status = 200, description = "Peer record", body = PeerDto),
@@ -126,7 +130,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(addr_port): Path<Str
     };
     let filter = list_filter(&state.config, q.all);
     match state.runtime.store.blocking(move |s| s.get(&net)).await {
-        Ok(Some(rec)) if filter.matches(&rec) => Json(PeerDto::from_record(&rec, true)).into_response(),
+        Ok(Some(rec)) if filter.matches(&rec) && rec.last_success_ms > 0 => Json(PeerDto::from_record(&rec, true)).into_response(),
         Ok(_) => ApiError::NotFound("peer not found").into_response(),
         Err(err) => {
             warn!("web: GET /peers/<addr> store error: {err}");
