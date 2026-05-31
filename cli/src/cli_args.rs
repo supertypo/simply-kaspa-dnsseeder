@@ -106,6 +106,11 @@ pub struct DnsArgs {
     #[clap(long, default_value = "0.0.0.0:53,[::]:53", value_delimiter = ',', num_args = 1..)]
     pub dns_listen: Vec<SocketAddr>,
 
+    /// Maximum number of A/AAAA records returned per DNS answer (1–100). Responses
+    /// that exceed the client's UDP buffer are truncated and retried over TCP.
+    #[clap(long, default_value_t = 25, value_parser = clap::value_parser!(u8).range(1..=100))]
+    pub dns_max_records: u8,
+
     /// Minimum protocol version accepted in DNS responses (optional).
     #[clap(long)]
     pub min_protocol_version: Option<u32>,

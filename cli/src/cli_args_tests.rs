@@ -92,6 +92,26 @@ fn min_user_agent_rejects_garbage() {
 }
 
 #[test]
+fn dns_max_records_defaults_to_25() {
+    let cli = parse(&[]);
+    assert_eq!(cli.dns.dns_max_records, 25);
+}
+
+#[test]
+fn dns_max_records_accepts_upper_bound() {
+    let cli = parse(&["--dns-max-records", "100"]);
+    assert_eq!(cli.dns.dns_max_records, 100);
+}
+
+#[test]
+fn dns_max_records_rejects_out_of_range() {
+    for bad in ["0", "101", "1000"] {
+        let res = CliArgs::try_parse_from(["simply-kaspa-dnsseeder", "--dns-max-records", bad]);
+        assert!(res.is_err(), "--dns-max-records {bad} must be rejected");
+    }
+}
+
+#[test]
 fn allowed_origins_parses_csv() {
     let cli = parse(&["--network-id", "mainnet", "--allowed-origins", "http://a,http://b"]);
     assert_eq!(cli.http.allowed_origins, vec!["http://a", "http://b"]);

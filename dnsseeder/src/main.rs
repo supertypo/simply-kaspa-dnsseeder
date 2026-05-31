@@ -98,6 +98,7 @@ async fn run(cli: CliArgs) -> Result<()> {
             stale_good: cli.crawler.stale_good,
             min_protocol_version: cli.dns.min_protocol_version,
             min_user_agent: cli.dns.min_user_agent.clone(),
+            max_records: cli.dns.dns_max_records.into(),
             ..DnsConfig::new(
                 network_id,
                 default_port,
