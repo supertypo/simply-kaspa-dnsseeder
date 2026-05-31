@@ -3,6 +3,9 @@
 //! are managed here; everything domain-specific lives in the library crates.
 
 mod metrics_source;
+mod network_gate;
+#[cfg(test)]
+mod network_gate_tests;
 mod stats;
 
 use std::path::PathBuf;
@@ -25,6 +28,7 @@ use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::broadcast;
 
 use crate::metrics_source::SubsystemMetrics;
+use crate::network_gate::{effective_default_port, require_seeder_for_unknown_network};
 use crate::stats::{Metrics, ValidityCriteria, stats_loop};
 
 #[tokio::main]
@@ -43,6 +47,8 @@ async fn run(cli: CliArgs) -> Result<()> {
     cli.validate().map_err(|e| anyhow!(e))?;
     let network_id =
         NetworkId::from_str(&cli.network_id).map_err(|err| anyhow!("invalid --network-id `{}`: {err}", cli.network_id))?;
+    require_seeder_for_unknown_network(network_id, cli.crawler.seeder.as_deref())?;
+    let default_port = effective_default_port(network_id, cli.crawler.seeder.as_deref());
 
     let datadir = prepare_datadir(&cli.datadir, network_id).await?;
     let store_path = datadir.join("peers.redb");
@@ -55,7 +61,7 @@ async fn run(cli: CliArgs) -> Result<()> {
     let validity = ValidityCriteria {
         min_protocol_version: cli.dns.min_protocol_version,
         min_user_agent: cli.dns.min_user_agent.clone(),
-        strict_default_port: cli.crawler.strict_port.then_some(network_id.default_p2p_port()),
+        strict_default_port: cli.crawler.strict_port.then_some(default_port),
     };
     let metrics = Metrics::new(network_id, CliArgs::version(), cli.crawler.stale_good, validity);
     metrics.load_from(&store);
@@ -65,6 +71,7 @@ async fn run(cli: CliArgs) -> Result<()> {
 
     let scheduler_cfg = SchedulerConfig {
         network_id,
+        default_port,
         threads: cli.crawler.threads,
         probe_tick: cli.crawler.probe_tick,
         stale_good: cli.crawler.stale_good,
@@ -93,6 +100,7 @@ async fn run(cli: CliArgs) -> Result<()> {
             min_user_agent: cli.dns.min_user_agent.clone(),
             ..DnsConfig::new(
                 network_id,
+                default_port,
                 dns_listen.clone(),
                 cli.dns.dns_zone.clone().expect("dns_enabled implies dns_zone"),
                 cli.dns.dns_nameserver.clone().expect("dns_enabled implies dns_nameserver"),
@@ -127,7 +135,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         allowed_origins: cli.http.allowed_origins.clone(),
         post_rate_limit: cli.http.post_rate_limit,
         rate_limit_window: cli.http.rate_limit_window,
-        network_default_port: network_id.default_p2p_port(),
+        network_default_port: default_port,
         strict_port: cli.crawler.strict_port,
         api_prefix: cli.http.api_prefix.clone(),
         db_path: store_path.clone(),

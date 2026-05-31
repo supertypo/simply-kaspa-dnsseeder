@@ -11,6 +11,7 @@
 //! pool lives in [`crate::worker_pool`].
 
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,8 +33,6 @@ use simply_kaspa_dnsseeder_common::{duration_to_ms, now_ms};
 
 /// Pruning cadence (matches Go dnsseeder).
 const PRUNE_INTERVAL: Duration = Duration::from_mins(1);
-/// Per-host timeout for `--seeder` lookups so a single dead host can't stall bootstrap.
-const SEEDER_LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 /// Cadence at which the built-in DNS seeders are re-resolved so newly added entries percolate
 /// in without a restart.
 const SEEDER_REFRESH_INTERVAL: Duration = Duration::from_mins(10);
@@ -44,6 +43,9 @@ const PROBE_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 #[derive(Debug, Clone)]
 pub struct SchedulerConfig {
     pub network_id: NetworkId,
+    /// Effective default P2P port for this network (built-in default, or the port carried by
+    /// `--seeder` for networks without bundled seeders).
+    pub default_port: u16,
     pub threads: usize,
     /// How often `enqueue_probes` scans the store for eligible peers.
     pub probe_tick: Duration,
@@ -114,7 +116,7 @@ impl Scheduler {
                 in_flight: Arc::new(DashSet::new()),
                 metrics: self.metrics.clone(),
                 cancel: self.cancel.clone(),
-                default_port: self.config.network_id.default_p2p_port(),
+                default_port: self.config.default_port,
                 strict_port: self.config.strict_port,
             },
             self.config.threads,
@@ -172,10 +174,10 @@ impl Scheduler {
             dns_seed_many(self.config.network_id, self.resolver.clone()).await
         } else {
             info!("crawler: bootstrapping from --seeder hosts: {:?}", self.config.seeders);
-            self.resolve_explicit_seeders().await
+            self.resolve_explicit_seeders()
         };
 
-        let default_port = self.config.network_id.default_p2p_port();
+        let default_port = self.config.default_port;
         let inserted = insert_bootstrap_stubs(&self.store, bootstrap_addrs, default_port, self.config.strict_port).await;
         if inserted > 0 {
             info!("crawler: bootstrap inserted {inserted} address stub(s)");
@@ -188,19 +190,18 @@ impl Scheduler {
     async fn refresh_builtin_seeders(&self) {
         let addrs = dns_seed_many(self.config.network_id, self.resolver.clone()).await;
         let pulled = addrs.len();
-        let default_port = self.config.network_id.default_p2p_port();
+        let default_port = self.config.default_port;
         let inserted = insert_bootstrap_stubs(&self.store, addrs, default_port, self.config.strict_port).await;
         info!("crawler: refresh: pulled {pulled} built-in seeder address(es), {inserted} new");
     }
 
-    async fn resolve_explicit_seeders(&self) -> Vec<SocketAddr> {
-        let port = self.config.network_id.default_p2p_port();
+    fn resolve_explicit_seeders(&self) -> Vec<SocketAddr> {
         let mut out = Vec::new();
-        for host in &self.config.seeders {
-            match tokio::time::timeout(SEEDER_LOOKUP_TIMEOUT, self.resolver.lookup(host, port)).await {
-                Ok(Ok(list)) => out.extend(list),
-                Ok(Err(err)) => warn!("crawler: --seeder {host} failed: {err}"),
-                Err(_) => warn!("crawler: --seeder {host} timed out after {SEEDER_LOOKUP_TIMEOUT:?}"),
+        for raw in &self.config.seeders {
+            let trimmed = raw.trim();
+            match SocketAddr::from_str(trimmed) {
+                Ok(addr) => out.push(addr),
+                Err(_) => warn!("crawler: --seeder {raw} is not a literal IP:port; skipping"),
             }
         }
         out
@@ -213,7 +214,7 @@ impl Scheduler {
         let dead_cutoff = now.saturating_sub(self.config.dead_after_ms());
         let stale_good_ms = self.config.stale_good_ms();
         let stale_bad_ms = self.config.stale_bad_ms();
-        let default_port = self.config.network_id.default_p2p_port();
+        let default_port = self.config.default_port;
         let strict_port = self.config.strict_port;
         let threads = self.config.threads.max(1);
 

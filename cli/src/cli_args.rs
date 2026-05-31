@@ -19,7 +19,8 @@ use std::time::Duration;
 #[derive(Parser, Clone, Debug)]
 #[command(name = "simply-kaspa-dnsseeder", version = env!("VERGEN_GIT_DESCRIBE"), about = "Kaspa DNS seeder")]
 pub struct CliArgs {
-    /// Network identifier (e.g. `mainnet`, `testnet-10`, `devnet`, `simnet`).
+    /// Network identifier. Built-in networks (mainnet, testnet-10) bootstrap from their bundled
+    /// DNS seeders; any other network (devnet, simnet, custom testnet suffixes) requires `--seeder`.
     #[clap(short = 'n', long, default_value = "mainnet")]
     pub network_id: String,
 
@@ -47,7 +48,11 @@ pub struct CliArgs {
 /// Crawler / probe scheduling options.
 #[derive(Args, Clone, Debug)]
 pub struct CrawlerArgs {
-    /// Optional bootstrap node `host:port`.
+    /// Optional bootstrap node as a literal `IP:port` (IPv4 or `[IPv6]:port`). Hostnames are
+    /// not accepted. For built-in networks the seeder is added as an extra peer; its port has
+    /// no effect on the network's default p2p port (DNS responses still use the network
+    /// default). For unknown networks (e.g. `testnet-12`) `--seeder` is mandatory and its port
+    /// becomes the network's default p2p port.
     #[clap(short = 's', long)]
     pub seeder: Option<String>,
 

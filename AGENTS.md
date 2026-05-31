@@ -49,6 +49,16 @@ IPv4-mapped IPv6 addresses (`::ffff:1.2.3.4`) are collapsed to plain IPv4 via `c
 ### Port policy
 `strict_port` (CLI flag, default off) makes both the crawler and the DNS filter reject any address whose port differs from the network's default P2P port. Important on Mainnet to filter out misconfigured nodes; relax for testnets where operators bind alt ports.
 
+### Unknown-network bootstrap
+`dnsseeder::network_gate` is the startup gate. Built-in networks are those with a non-empty `Params::dns_seeders` (currently mainnet + testnet-10). Anything else (devnet, simnet, custom testnet suffixes like `testnet-12`) requires `--seeder IP:port` — hostnames are rejected. `--seeder` is parsed as a literal `SocketAddr` only.
+
+`network_gate::effective_default_port` produces the *effective* default P2P port plumbed into `SchedulerConfig.default_port`, `DnsConfig.default_port` and `WebConfig.network_default_port`:
+- Built-in networks: `NetworkId::default_p2p_port()`. A `--seeder` peer's port is unrelated to the network default — the seeder is just an extra crawl target.
+- Unknown networks: the port carried by `--seeder IP:port`. This is what DNS answers for, what `strict_port` enforces, and what `is_acceptable_address` substitutes when a peer advertises port 0.
+
+`crawler::seeders::dns_seed_many` short-circuits to an empty list for any network not in `NetworkId::iter()` (avoids the panic-prone `Params::from(NetworkId)` for unknown suffixes).
+
+
 ### Filter knobs surfaced through the DNS query path
 `store::Filter` lets the DNS handler filter on `min_protocol_version`, `min_user_agent` (semver), family (A vs AAAA), default port, and `stale_good_ms`. These come from `DnsConfig`, which is hydrated from CLI flags in `dnsseeder/src/main.rs`. Keep `DnsConfig::new` as the "all-defaults" constructor and use struct-update syntax for CLI overrides — don't multiply constructors.
 

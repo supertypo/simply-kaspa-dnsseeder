@@ -7,6 +7,9 @@ use semver::Version;
 #[derive(Debug, Clone)]
 pub struct DnsConfig {
     pub network_id: NetworkId,
+    /// Effective P2P port answered in DNS responses; `NetworkId::default_p2p_port` for built-in
+    /// networks, the operator's `--seeder` port for unknown networks.
+    pub default_port: u16,
     pub dns_listen: Vec<SocketAddr>,
     pub dns_zone: String,
     pub nameserver: String,
@@ -24,9 +27,10 @@ pub struct DnsConfig {
 
 impl DnsConfig {
     #[must_use]
-    pub fn new(network_id: NetworkId, dns_listen: Vec<SocketAddr>, dns_zone: String, nameserver: String) -> Self {
+    pub fn new(network_id: NetworkId, default_port: u16, dns_listen: Vec<SocketAddr>, dns_zone: String, nameserver: String) -> Self {
         Self {
             network_id,
+            default_port,
             dns_listen,
             dns_zone,
             nameserver,

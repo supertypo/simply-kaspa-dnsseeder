@@ -33,9 +33,13 @@ impl Resolver for TokioResolver {
 /// Resolve all configured DNS seeders in parallel. Per-seeder failures and
 /// timeouts are logged but don't abort bootstrap.
 pub async fn dns_seed_many<R: Resolver + ?Sized + 'static>(network_id: NetworkId, resolver: std::sync::Arc<R>) -> Vec<SocketAddr> {
-    let params: Params = network_id.into();
     let port = network_id.default_p2p_port();
-    let seeders: Vec<&'static str> = params.dns_seeders.to_vec();
+    let seeders: Vec<&'static str> = if NetworkId::iter().any(|n| n == network_id) {
+        let params: Params = network_id.into();
+        params.dns_seeders.to_vec()
+    } else {
+        Vec::new()
+    };
 
     if seeders.is_empty() {
         warn!("crawler: no dns seeders configured for network {network_id}");

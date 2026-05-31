@@ -31,7 +31,7 @@ pub fn build_serving_cache(
     shutdown: tokio::sync::broadcast::Receiver<()>,
 ) -> (Arc<ServingCache>, tokio::task::JoinHandle<()>) {
     let cache = Arc::new(ServingCache::new());
-    let p2p_port = config.network_id.default_p2p_port();
+    let p2p_port = config.default_port;
     let cap = config.max_records.saturating_mul(SNAPSHOT_MULTIPLIER);
     serving_cache::refresh_now(&cache, &store, config, p2p_port, cap);
     let handle = serving_cache::spawn_refresher(

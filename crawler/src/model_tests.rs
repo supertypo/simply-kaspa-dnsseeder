@@ -65,3 +65,131 @@ fn peer_record_preserves_first_seen_on_update() {
     assert_eq!(later.first_seen_ms, 1);
     assert_eq!(later.last_success_ms, 100);
 }
+
+mod is_acceptable_address {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use simply_kaspa_dnsseeder_store::NetAddress;
+
+    use crate::model::is_acceptable_address;
+
+    const DEFAULT_PORT: u16 = 16111;
+
+    fn v4(a: u8, b: u8, c: u8, d: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(a, b, c, d))
+    }
+    fn v6(s: &str) -> IpAddr {
+        IpAddr::V6(s.parse::<Ipv6Addr>().unwrap())
+    }
+    fn net(ip: IpAddr, port: u16) -> NetAddress {
+        NetAddress { ip, port }
+    }
+
+    #[test]
+    fn accepts_public_v4() {
+        assert!(is_acceptable_address(&net(v4(8, 8, 8, 8), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(is_acceptable_address(&net(v4(1, 1, 1, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn accepts_public_v6() {
+        assert!(is_acceptable_address(
+            &net(v6("2001:4860:4860::8888"), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
+        assert!(is_acceptable_address(
+            &net(v6("2606:4700:4700::1111"), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
+    }
+
+    #[test]
+    fn rejects_port_zero() {
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 0), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_ephemeral_ports_when_not_strict() {
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 32768), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 55000), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 65535), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn accepts_non_default_low_ports_when_not_strict() {
+        assert!(is_acceptable_address(&net(v4(8, 8, 8, 8), 16110), DEFAULT_PORT, false));
+        assert!(is_acceptable_address(&net(v4(8, 8, 8, 8), 1234), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn strict_port_rejects_non_default() {
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 16110), DEFAULT_PORT, true));
+        assert!(!is_acceptable_address(&net(v4(8, 8, 8, 8), 1234), DEFAULT_PORT, true));
+        assert!(is_acceptable_address(&net(v4(8, 8, 8, 8), DEFAULT_PORT), DEFAULT_PORT, true));
+    }
+
+    #[test]
+    fn rejects_unspecified() {
+        assert!(!is_acceptable_address(&net(v4(0, 0, 0, 0), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v6("::"), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_loopback() {
+        assert!(!is_acceptable_address(&net(v4(127, 0, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v6("::1"), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_v4_private_ranges() {
+        assert!(!is_acceptable_address(&net(v4(10, 0, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(192, 168, 1, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(172, 16, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(
+            &net(v4(172, 31, 255, 254), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
+    }
+
+    #[test]
+    fn rejects_v4_cgnat() {
+        assert!(!is_acceptable_address(&net(v4(100, 64, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_v4_link_local_and_broadcast() {
+        assert!(!is_acceptable_address(&net(v4(169, 254, 1, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(
+            &net(v4(255, 255, 255, 255), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
+    }
+
+    #[test]
+    fn rejects_v4_documentation_ranges() {
+        assert!(!is_acceptable_address(&net(v4(192, 0, 2, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(198, 51, 100, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v4(203, 0, 113, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_v6_unique_local_and_link_local() {
+        assert!(!is_acceptable_address(&net(v6("fc00::1"), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(
+            &net(v6("fd12:3456:789a::1"), DEFAULT_PORT),
+            DEFAULT_PORT,
+            false
+        ));
+        assert!(!is_acceptable_address(&net(v6("fe80::1"), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+
+    #[test]
+    fn rejects_multicast() {
+        assert!(!is_acceptable_address(&net(v4(224, 0, 0, 1), DEFAULT_PORT), DEFAULT_PORT, false));
+        assert!(!is_acceptable_address(&net(v6("ff02::1"), DEFAULT_PORT), DEFAULT_PORT, false));
+    }
+}

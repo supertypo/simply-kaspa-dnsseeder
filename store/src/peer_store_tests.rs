@@ -361,3 +361,70 @@ fn delete_removes_attempt_index_entry() {
     let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();
     assert!(due.is_empty());
 }
+
+mod is_eligible_for_probe {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use crate::peer_store::is_eligible_for_probe as is_eligible;
+    use crate::record::{NetAddress, PeerRecord};
+
+    fn rec(last_attempt: i64, last_success: i64, first_seen: i64, last_seen: i64) -> PeerRecord {
+        PeerRecord {
+            id: [0u8; 16],
+            protocol_version: 0,
+            timestamp_ms: 0,
+            address: NetAddress {
+                ip: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+                port: 16111,
+            },
+            user_agent: String::new(),
+            subnetwork_id: None,
+            first_seen_ms: first_seen,
+            last_attempt_ms: last_attempt,
+            last_success_ms: last_success,
+            last_seen_ms: last_seen,
+        }
+    }
+
+    const NOW: i64 = 10_000_000;
+    const GOOD: i64 = 900_000; // 15m
+    const BAD: i64 = 7_200_000; // 2h
+    const DEAD_CUTOFF: i64 = 0;
+
+    #[test]
+    fn good_recent_not_eligible() {
+        let r = rec(NOW - 100_000, NOW - 200_000, NOW - 1_000_000, NOW - 100_000);
+        assert!(!is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn good_stale_eligible() {
+        let r = rec(NOW - GOOD - 1, NOW - 2_000_000, NOW - 10_000_000, NOW - GOOD - 1);
+        assert!(is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn bad_recent_not_eligible() {
+        let r = rec(NOW - 1_800_000, 0, NOW - 2_000_000, 0);
+        assert!(!is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn bad_stale_eligible() {
+        let r = rec(NOW - BAD - 1, 0, NOW - BAD - 1, 0);
+        assert!(is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn never_attempted_stub_eligible() {
+        let r = rec(0, 0, NOW - 60_000, NOW - 60_000);
+        assert!(is_eligible(&r, NOW, GOOD, BAD, DEAD_CUTOFF));
+    }
+
+    #[test]
+    fn past_dead_cutoff_not_eligible() {
+        // Both first_seen and last_seen below cutoff → considered dead, skip.
+        let r = rec(NOW - BAD - 1, 0, 100, 100);
+        assert!(!is_eligible(&r, NOW, GOOD, BAD, 1_000));
+    }
+}

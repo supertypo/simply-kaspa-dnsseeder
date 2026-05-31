@@ -173,7 +173,13 @@ mod tests {
     fn cfg() -> (DnsConfig, u16) {
         let net = NetworkId::new(NetworkType::Mainnet);
         let port = net.default_p2p_port();
-        let cfg = DnsConfig::new(net, vec!["127.0.0.1:0".parse().unwrap()], "seed.test.".into(), "ns.test.".into());
+        let cfg = DnsConfig::new(
+            net,
+            port,
+            vec!["127.0.0.1:0".parse().unwrap()],
+            "seed.test.".into(),
+            "ns.test.".into(),
+        );
         (cfg, port)
     }
 

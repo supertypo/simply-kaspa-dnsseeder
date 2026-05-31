@@ -18,8 +18,6 @@ mod worker_pool;
 #[cfg(test)]
 mod model_tests;
 #[cfg(test)]
-mod scheduler_tests;
-#[cfg(test)]
 mod seeders_tests;
 
 pub use error::{Error, ProbeError};

@@ -31,3 +31,12 @@ async fn dns_seed_many_aggregates_and_tolerates_failures() {
         assert_eq!(addr.port(), nid.default_p2p_port());
     }
 }
+
+#[tokio::test]
+async fn dns_seed_many_returns_empty_for_unknown_network() {
+    // Unknown testnet suffixes (not in `NetworkId::iter`) would panic in
+    // `Params::from`. The function must short-circuit to an empty list.
+    let nid = NetworkId::with_suffix(NetworkType::Testnet, 12);
+    let out = dns_seed_many(nid, Arc::new(StaticResolver)).await;
+    assert!(out.is_empty());
+}

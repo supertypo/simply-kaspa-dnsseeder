@@ -19,6 +19,8 @@ pub mod runner;
 #[cfg(test)]
 mod initializer_tests;
 #[cfg(test)]
+mod runner_tests;
+#[cfg(test)]
 mod tests;
 
 // Bound on the post-probe peer shutdown so a hung peer can't stall the caller.
