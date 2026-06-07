@@ -88,7 +88,8 @@ pub(crate) async fn apply_success(
         .await
 }
 
-/// Insert routable advertised addresses as stubs and return the count of newly inserted records.
+/// Record routable advertised addresses as seen (inserting a stub when new,
+/// otherwise bumping `last_seen_ms`) and return the count of newly inserted records.
 async fn insert_discovered_stubs(store: &PeerStore, addresses: Vec<(IpAddress, u16)>, default_port: u16, strict_port: bool) -> usize {
     let now = now_ms();
     store
@@ -102,10 +103,10 @@ async fn insert_discovered_stubs(store: &PeerStore, addresses: Vec<(IpAddress, u
                 if !is_acceptable_address(&net, default_port, strict_port) {
                     continue;
                 }
-                match s.insert_stub_if_missing(&net, now) {
+                match s.insert_or_refresh_seen(&net, now) {
                     Ok(true) => inserted += 1,
                     Ok(false) => {}
-                    Err(err) => warn!("crawler: failed to insert stub for {canonical}:{port}: {err}"),
+                    Err(err) => warn!("crawler: failed to seed discovered address {canonical}:{port}: {err}"),
                 }
             }
             inserted

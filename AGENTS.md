@@ -19,9 +19,13 @@ The store (`store::PeerStore`, redb-backed) is the only shared state. There is n
 ## Tricky parts
 
 ### Discovery never enqueues directly
-When a probe succeeds and the peer advertises addresses, those addresses are written to the store via `PeerStore::insert_stub_if_missing` and **nothing else**. The scheduler's `probe_tick` is the *only* code path that picks peers to probe. This is intentional — letting discovery enqueue caused ephemeral-port floods where one chatty peer could pin every worker.
+When a probe succeeds and the peer advertises addresses, those addresses are written to the store via `PeerStore::insert_or_refresh_seen` and **nothing else**. The scheduler's `probe_tick` is the *only* code path that picks peers to probe. This is intentional — letting discovery enqueue caused ephemeral-port floods where one chatty peer could pin every worker.
 
 A "stub" record has `last_success_ms = 0` and `last_attempt_ms = 0`. The DNS filter rejects stubs (see eligibility filter), and the scheduler treats them as "never succeeded" peers for cadence purposes.
+
+### `last_seen_ms` is the "seen in any capacity" timestamp / prune anchor
+`insert_or_refresh_seen` is the single entry point for every non-probe sighting — DNS-seeder bootstrap, `--seeder` arg, and peer-gossiped addresses from a successful probe. It creates a stub when missing and otherwise **only bumps `last_seen_ms`**, leaving `last_attempt_ms`, `last_success_ms`, `first_seen_ms`, the peer id and the attempt index untouched (so probe cadence and the "discovery never enqueues" invariant hold). `prune_dead` keys solely off `last_seen_ms`/`first_seen_ms`, so refreshing here keeps still-gossiped anchors from being pruned out from under the crawler after extended downtime — without making them DNS-servable (DNS keys off `last_success_ms`). Consequence: a peer the network keeps advertising is never pruned even if unreachable; it stays in the bad-class probe rotation but never reaches DNS. A failed direct probe is *not* a sighting — it bumps only `last_attempt_ms`.
+
 
 ### In-flight back-pressure
 `enqueue_probes` overfetches a small multiple of `--threads` from the store's most-overdue index, then walks the candidates handing each to `WorkerPool::try_enqueue`. The pool deduplicates against an in-flight set and reports `Full` once its bounded channel is saturated — the scheduler stops dispatching for that tick and counts the rest as `skipped_backpressure`. Without this cap, defaults of `probe_timeout >= probe_tick` would grow the backlog unboundedly. Probes themselves are bounded by `Semaphore::new(threads)` acquired *inside* each spawned task.

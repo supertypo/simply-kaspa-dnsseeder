@@ -271,10 +271,10 @@ async fn insert_bootstrap_stubs(store: &PeerStore, addrs: Vec<SocketAddr>, defau
             debug!("crawler: rejected bootstrap address {addr}");
             continue;
         }
-        match store.blocking(move |s| s.insert_stub_if_missing(&net, now)).await {
+        match store.blocking(move |s| s.insert_or_refresh_seen(&net, now)).await {
             Ok(true) => inserted += 1,
             Ok(false) => {}
-            Err(err) => warn!("crawler: failed to insert bootstrap stub for {addr}: {err}"),
+            Err(err) => warn!("crawler: failed to seed bootstrap address {addr}: {err}"),
         }
     }
     inserted

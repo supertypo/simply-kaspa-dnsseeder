@@ -132,7 +132,7 @@ async fn duplicates_within_one_result_only_insert_once() {
 }
 
 #[tokio::test]
-async fn discovery_does_not_overwrite_existing_record() {
+async fn discovery_bumps_only_last_seen_on_existing_record() {
     let probe = FanoutProbe {
         addresses: vec![(ip4(8, 8, 8, 8), 16111)],
     };
@@ -145,7 +145,11 @@ async fn discovery_does_not_overwrite_existing_record() {
     probe_one(&probe, &store, source, DEFAULT_PORT, false, None).await;
 
     let post = store.get(&addr).unwrap().unwrap();
-    assert_eq!(pre, post, "discovery must not touch an existing record");
+    assert!(post.last_seen_ms > pre.last_seen_ms, "discovery must bump last_seen");
+    assert_eq!(post.first_seen_ms, pre.first_seen_ms, "first_seen preserved");
+    assert_eq!(post.last_attempt_ms, pre.last_attempt_ms, "last_attempt untouched");
+    assert_eq!(post.last_success_ms, pre.last_success_ms, "last_success untouched");
+    assert_eq!(post.id, pre.id, "id untouched");
 }
 
 #[tokio::test]

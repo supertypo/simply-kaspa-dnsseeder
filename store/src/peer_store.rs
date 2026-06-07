@@ -252,17 +252,40 @@ impl PeerStore {
         Ok(rec)
     }
 
-    /// Insert a stub for `addr` if none exists. Discovery-only path —
-    /// does not touch `last_attempt_ms`. Returns true when a new record is created.
-    pub fn insert_stub_if_missing(&self, addr: &NetAddress, now_ms: i64) -> Result<bool, Error> {
+    /// Mark `addr` as seen at `now_ms` from a non-probe source (DNS seeder,
+    /// `--seeder` arg, or peer-gossiped address). Creates a stub if none exists;
+    /// otherwise only bumps `last_seen_ms`, leaving `last_attempt_ms`,
+    /// `last_success_ms`, `first_seen_ms`, the peer id and the attempt index
+    /// untouched so probe cadence and DNS eligibility are unaffected.
+    ///
+    /// `last_seen_ms` is the sole anti-prune anchor: refreshing it here keeps a
+    /// still-gossiped peer from being pruned out from under the crawler without
+    /// making it servable over DNS (which keys off `last_success_ms`).
+    ///
+    /// Uses `Durability::None` — losing the latest bump on crash only risks a
+    /// slightly-early prune, far cheaper than fsync per gossiped address.
+    ///
+    /// Returns `true` when a new stub was created, `false` when an existing
+    /// record was refreshed.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `set_durability` is called after a table has been opened in the
+    /// transaction; this would indicate a programmer error in this method.
+    pub fn insert_or_refresh_seen(&self, addr: &NetAddress, now_ms: i64) -> Result<bool, Error> {
         let key = encode_key(addr)?;
-        let txn = self.db.begin_write()?;
+        let mut txn = self.db.begin_write()?;
+        txn.set_durability(Durability::None).expect("durability set before any open_table");
         let inserted = {
             let mut t = txn.open_table(PEERS)?;
-            let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
-            if t.get(key.as_slice())?.is_some() {
+            let existing = t.get(key.as_slice())?.map(|v| decode_record(v.value())).transpose()?;
+            if let Some(mut rec) = existing {
+                rec.last_seen_ms = now_ms;
+                let bytes = encode_record(&rec)?;
+                t.insert(key.as_slice(), bytes.as_slice())?;
                 false
             } else {
+                let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
                 let rec = PeerRecord {
                     id: UNKNOWN_PEER_ID,
                     protocol_version: 0,

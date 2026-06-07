@@ -477,7 +477,7 @@ async fn list_peers_hides_stubs_in_both_modes() {
         ip: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
         port: 16111,
     };
-    store.insert_stub_if_missing(&net, 0).unwrap();
+    store.insert_or_refresh_seen(&net, 0).unwrap();
 
     let state = make_state(Arc::new(MockProber::default()), store, "test-key");
     let app = build_router(state);

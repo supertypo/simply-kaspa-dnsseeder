@@ -141,14 +141,14 @@ fn record_attempt_preserves_existing_success_fields() {
 }
 
 #[test]
-fn insert_stub_if_missing_creates_then_noops() {
+fn insert_or_refresh_seen_creates_then_bumps_last_seen() {
     let (_dir, store) = open_temp_store();
     let addr = NetAddress {
         ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)),
         port: 16111,
     };
 
-    assert!(store.insert_stub_if_missing(&addr, 100).unwrap());
+    assert!(store.insert_or_refresh_seen(&addr, 100).unwrap(), "new address inserts a stub");
     let r1 = store.get(&addr).unwrap().expect("stub present");
     assert_eq!(r1.id, UNKNOWN_PEER_ID);
     assert_eq!(r1.first_seen_ms, 100);
@@ -156,19 +156,40 @@ fn insert_stub_if_missing_creates_then_noops() {
     assert_eq!(r1.last_attempt_ms, 0);
     assert_eq!(r1.last_success_ms, 0);
 
-    assert!(!store.insert_stub_if_missing(&addr, 999).unwrap());
+    assert!(!store.insert_or_refresh_seen(&addr, 999).unwrap(), "existing address refreshes");
     let r2 = store.get(&addr).unwrap().expect("stub still present");
-    assert_eq!(r2, r1, "existing record must be untouched");
+    assert_eq!(r2.last_seen_ms, 999, "last_seen must be bumped on re-seed");
+    assert_eq!(r2.first_seen_ms, r1.first_seen_ms, "first_seen preserved");
+    assert_eq!(r2.last_attempt_ms, r1.last_attempt_ms, "last_attempt untouched");
+    assert_eq!(r2.last_success_ms, r1.last_success_ms, "last_success untouched");
 }
 
 #[test]
-fn insert_stub_if_missing_does_not_touch_existing_record() {
+fn insert_or_refresh_seen_bumps_only_last_seen_on_existing_record() {
     let (_dir, store) = open_temp_store();
     let r = make_rec(1, Ipv4Addr::new(7, 7, 7, 7), 16111, 100);
     store.upsert(&r).unwrap();
-    assert!(!store.insert_stub_if_missing(&r.address, 999).unwrap());
+    assert!(!store.insert_or_refresh_seen(&r.address, 999).unwrap(), "existing record refreshes");
     let got = store.get(&r.address).unwrap().unwrap();
-    assert_eq!(got, r);
+    assert_eq!(got.last_seen_ms, 999);
+    assert_eq!(got.id, r.id, "id preserved");
+    assert_eq!(got.first_seen_ms, r.first_seen_ms);
+    assert_eq!(got.last_attempt_ms, r.last_attempt_ms);
+    assert_eq!(got.last_success_ms, r.last_success_ms);
+    assert_eq!(got.user_agent, r.user_agent);
+}
+
+#[test]
+fn insert_or_refresh_seen_rescues_record_from_prune() {
+    let (_dir, store) = open_temp_store();
+    // A stale peer that would otherwise be pruned at cutoff 500.
+    let r = make_rec(1, Ipv4Addr::new(8, 8, 8, 8), 16111, 100);
+    store.upsert(&r).unwrap();
+    // Re-seeing it (DNS seeder / gossip) refreshes last_seen past the cutoff.
+    assert!(!store.insert_or_refresh_seen(&r.address, 600).unwrap());
+    let removed = store.prune_dead(500).unwrap();
+    assert_eq!(removed, 0, "refreshed peer must survive prune");
+    assert!(store.get(&r.address).unwrap().is_some());
 }
 
 #[test]
@@ -353,7 +374,7 @@ fn delete_removes_attempt_index_entry() {
         ip: IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)),
         port: 16111,
     };
-    store.insert_stub_if_missing(&net, 0).unwrap();
+    store.insert_or_refresh_seen(&net, 0).unwrap();
     // Stub is bad-class → eligible once since_attempt ≥ stale_bad.
     let due = store.due_for_probe(10_000, 100, 500, 0, 10).unwrap();
     assert_eq!(due.len(), 1);
