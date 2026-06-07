@@ -21,8 +21,9 @@ panic = "abort"
 
 [workspace.package]
 rust-version = "1.96.0"
-authors = ["simply-kaspa-dnsseeder contributors"]
+authors = ["suprtypo@pm.me"]
 license = "MIT"
+license-file = "LICENSE"
 edition = "2024"
 
 [workspace.dependencies]
@@ -34,13 +35,13 @@ simply-kaspa-dnsseeder-crawler = { path = "crawler" }
 simply-kaspa-dnsseeder-dns = { path = "dns" }
 simply-kaspa-dnsseeder-web = { path = "web" }
 
-# Kaspa / rusty-kaspa (pinned to tn10-toc3)
-kaspa-p2p-lib = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
-kaspa-consensus-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
-kaspa-utils = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
-kaspa-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
-kaspa-hashes = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
-kaspa-utils-tower = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "tn10-toc3" }
+# Kaspa / rusty-kaspa
+kaspa-p2p-lib = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "v2.0.0" }
+kaspa-consensus-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "v2.0.0" }
+kaspa-utils = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "v2.0.0" }
+kaspa-core = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "v2.0.0" }
+kaspa-hashes = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "v2.0.0" }
+kaspa-utils-tower = { git = "https://github.com/kaspanet/rusty-kaspa.git", tag = "v2.0.0" }
 
 # Async runtime + utilities
 tokio = { version = "1.52.3", features = ["full"] }
@@ -55,7 +56,7 @@ axum-server = { version = "0.8.0", default-features = false, features = ["tls-ru
 rustls = { version = "0.23.40", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 tower-http = { version = "0.6.11", features = ["cors", "trace", "set-header"] }
 tower = "0.5.3"
-utoipa = { version = "5.4.0", features = ["axum_extras", "preserve_order"] }
+utoipa = { version = "5.5.0", features = ["axum_extras", "preserve_order"] }
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
 utoipa-axum = "0.2.0"
 
@@ -74,17 +75,17 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 serde_bytes = "0.11.19"
 env_logger = "0.11.10"
-log = "0.4.30"
+log = "0.4.32"
 
 # CLI / time / misc
 clap = { version = "4.6.1", features = ["derive"] }
-chrono = { version = "0.4.44", features = ["serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
 humantime = "2.3.0"
 humantime-serde = "1.1.1"
 semver = "1.0.28"
 dashmap = "7.0.0-rc2"
 hex = "0.4.3"
-uuid = { version = "1.23.1", features = ["v4"] }
+uuid = { version = "1.23.2", features = ["v4"] }
 rand = "0.10.1"
 socket2 = "0.6.4"
 thiserror = "2.0.18"
