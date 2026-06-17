@@ -41,7 +41,7 @@ plain_build() {
   echo "============================================================="
 
   $docker build --pull \
-    --build-arg REPO_DIR="$REPO_DIR" \
+    --build-arg REPO_DIR=.work \
     --build-arg RUST_VERSION="$rustVersion" \
     --build-arg VERSION="$gitDescribe" \
     --tag ${DOCKER_REPO}:$tag "$BUILD_DIR"
@@ -78,7 +78,7 @@ multi_arch_build() {
   done
 
   $docker buildx build --pull --platform=$(echo $ARCHES | sed 's/ /,/g') $dockerRepoArgs \
-    --build-arg REPO_DIR="$REPO_DIR" \
+    --build-arg REPO_DIR=.work \
     --build-arg RUST_VERSION="$rustVersion" \
     --build-arg VERSION="$gitDescribe" \
     --tag $DOCKER_REPO:$tag \
