@@ -264,7 +264,8 @@ async fn refuse<R: ResponseHandler>(request: &Request, mut response_handle: R) -
     let builder = MessageResponseBuilder::from_message_request(request);
     response_handle
         .send_response(builder.error_msg(&request.metadata, ResponseCode::Refused))
-        .await.unwrap_or_else(|_| error_info(ResponseCode::ServFail))
+        .await
+        .unwrap_or_else(|_| error_info(ResponseCode::ServFail))
 }
 
 // Returned only for hickory's internal logging; no bytes are transmitted.

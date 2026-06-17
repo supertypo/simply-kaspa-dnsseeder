@@ -124,12 +124,34 @@ async fn run(cli: CliArgs) -> Result<()> {
         None
     };
 
-    let api_key = cli.http.api_key.clone().unwrap_or_else(|| {
-        let key = generate_api_key();
-        info!("web: --api-key not set; generated ephemeral key (rotates each restart)");
+    const API_KEY_KV: &str = "api_key";
+    let api_key = if let Some(key) = cli.http.api_key.clone() {
         info!("web: X-API-KEY: {key}");
         key
-    });
+    } else {
+        store
+            .blocking(|s| {
+                match s.get_blob(API_KEY_KV) {
+                    Ok(Some(bytes)) => match String::from_utf8(bytes) {
+                        Ok(key) => {
+                            info!("web: X-API-KEY: {key} (loaded)");
+                            return key;
+                        }
+                        Err(_) => warn!("web: stored api-key is not valid UTF-8, regenerating"),
+                    },
+                    Ok(None) => {}
+                    Err(err) => warn!("web: failed to read api-key from store: {err}"),
+                }
+                let key = generate_api_key();
+                if let Err(err) = s.put_blob(API_KEY_KV, key.as_bytes()) {
+                    warn!("web: failed to persist api-key to store: {err}");
+                }
+                info!("web: X-API-KEY: {key} (generated)");
+                key
+            })
+            .await
+    };
+
     let web_cfg = WebConfig {
         listen: cli.http.http_listen.clone(),
         api_key,

@@ -72,7 +72,7 @@ With no arguments the seeder:
 - Persists discovered peers in `./data/mainnet/peers.redb`.
 - Runs the HTTP API on `0.0.0.0:5380` and `[::]:5380`.
 - DNS is **disabled** (no zone configured).
-- Generates an **ephemeral API key** at startup and prints it to the log — rotates on every restart. Pass `--api-key` to pin a stable key.
+- Generates a **persistent API key** on first startup, stores it in the peer database, and reuses it on subsequent restarts. Pass `--api-key` to use a specific key instead.
 
 This mode is useful for maintaining a local peer database, feeding a custom tool, or just exploring what's on the network.
 
