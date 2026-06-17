@@ -1,0 +1,53 @@
+name: Release binaries
+
+on:
+  release:
+    types: [ published ]
+
+jobs:
+  build-and-upload:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y pkg-config libssl-dev libpq-dev gcc protobuf-compiler
+
+      - name: Get binary name
+        run: echo "BIN_NAME=$(grep -m1 '^name' dnsseeder/Cargo.toml | sed 's/name = "\(.*\)"/\1/')" >> $GITHUB_ENV
+
+      - name: Build binary
+        run: |
+          RUSTFLAGS="-C target-feature=-crt-static -C link-args=-s" \
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Compress binary with arch suffix
+        run: |
+          BIN=target/${{ matrix.target }}/release/${{ env.BIN_NAME }}
+          chmod 755 "$BIN"
+          cp "$BIN" "${{ env.BIN_NAME }}-${{ matrix.arch }}"
+          gzip -f "${{ env.BIN_NAME }}-${{ matrix.arch }}"
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ env.BIN_NAME }}-${{ matrix.arch }}.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
