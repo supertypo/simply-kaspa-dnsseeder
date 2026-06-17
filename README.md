@@ -40,20 +40,22 @@ curl -L https://github.com/supertypo/simply-kaspa-dnsseeder/releases/latest/down
 
 ### Docker
 
-A Docker image can be built from the included [`docker/Dockerfile`](docker/Dockerfile):
+Prebuilt Docker images are available here: [Docker Hub](https://hub.docker.com/r/supertypo/simply-kaspa-dnsseeder)
+
+A Docker image can also be built from the included Dockerfile:
 
 ```bash
 # Build image
 docker/build.sh nopush dev
 ```
 
-Run with a persistent data volume:
+Run with a persistent data volume, replace :latest with :dev if using self-built:
 
 ```bash
 docker run -d \
   --network host \
   -v /srv/seeder/data:/data \
-  supertypo/simply-kaspa-dnsseeder \
+  supertypo/simply-kaspa-dnsseeder:latest \
   --dns-zone seed.mydomain.org \
   --dns-nameserver ns.mydomain.org
 ```
