@@ -254,24 +254,17 @@ async fn send<R: ResponseHandler>(
 ) -> ResponseInfo {
     let builder = MessageResponseBuilder::from_message_request(request);
     let resp = builder.build(metadata, answers.iter(), ns.iter(), soa.iter(), [].iter());
-    match response_handle.send_response(resp).await {
-        Ok(info) => info,
-        Err(err) => {
-            debug!("dns: failed to send response: {err}");
-            error_info(ResponseCode::ServFail)
-        }
-    }
+    response_handle.send_response(resp).await.unwrap_or_else(|err| {
+        debug!("dns: failed to send response: {err}");
+        error_info(ResponseCode::ServFail)
+    })
 }
 
 async fn refuse<R: ResponseHandler>(request: &Request, mut response_handle: R) -> ResponseInfo {
     let builder = MessageResponseBuilder::from_message_request(request);
-    match response_handle
+    response_handle
         .send_response(builder.error_msg(&request.metadata, ResponseCode::Refused))
-        .await
-    {
-        Ok(info) => info,
-        Err(_) => error_info(ResponseCode::ServFail),
-    }
+        .await.unwrap_or_else(|_| error_info(ResponseCode::ServFail))
 }
 
 // Returned only for hickory's internal logging; no bytes are transmitted.
