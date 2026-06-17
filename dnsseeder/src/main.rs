@@ -202,12 +202,7 @@ async fn run(cli: CliArgs) -> Result<()> {
 }
 
 async fn prepare_datadir(raw: &str, network_id: NetworkId) -> Result<PathBuf> {
-    let base = PathBuf::from(raw);
-    let dir = if network_id.network_type == kaspa_consensus_core::network::NetworkType::Mainnet {
-        base
-    } else {
-        base.join(network_id.to_string())
-    };
+    let dir = PathBuf::from(raw).join(network_id.to_string());
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("creating datadir {}", dir.display()))?;
