@@ -8,7 +8,13 @@ A small HTTP API on the side allows ad-hoc peer submissions and introspection.
 
 ## Build
 
-Requires the Rust toolchain pinned in [`rust-toolchain.toml`](rust-toolchain.toml).
+### Prerequisites
+
+- **Rust toolchain** pinned in [`rust-toolchain.toml`](rust-toolchain.toml) — installed automatically by `rustup`.
+- **Protocol Buffers compiler** (`protoc`) — required by the rusty-kaspa P2P dependency.
+  - macOS: `brew install protobuf`
+  - Debian/Ubuntu: `apt install protobuf-compiler`
+  - Alpine: `apk add protoc protobuf-dev`
 
 ```bash
 cargo build --release
@@ -16,74 +22,111 @@ cargo build --release
 
 The binary lands at `target/release/simply-kaspa-dnsseeder`.
 
+## Install
+
+### Pre-built binaries
+
+Each [GitHub release](https://github.com/supertypo/simply-kaspa-dnsseeder/releases) ships compressed binaries for Linux:
+
+```bash
+# AMD64
+curl -L https://github.com/supertypo/simply-kaspa-dnsseeder/releases/latest/download/simply-kaspa-dnsseeder-amd64.gz \
+  | gunzip > simply-kaspa-dnsseeder && chmod +x simply-kaspa-dnsseeder
+
+# ARM64
+curl -L https://github.com/supertypo/simply-kaspa-dnsseeder/releases/latest/download/simply-kaspa-dnsseeder-arm64.gz \
+  | gunzip > simply-kaspa-dnsseeder && chmod +x simply-kaspa-dnsseeder
+```
+
+### Docker
+
+A Docker image can be built from the included [`docker/Dockerfile`](docker/Dockerfile):
+
+```bash
+# Build image
+docker/build.sh nopush dev
+```
+
+Run with a persistent data volume:
+
+```bash
+docker run -d \
+  --network host \
+  -v /srv/seeder/data:/data \
+  supertypo/simply-kaspa-dnsseeder \
+  --dns-zone seed.mydomain.org \
+  --dns-nameserver ns.mydomain.org
+```
+
 ## Run
+
+### Minimum: pure crawler (no arguments)
+
+```bash
+simply-kaspa-dnsseeder
+```
+
+With no arguments the seeder:
+
+- Crawls **mainnet** using the built-in bootstrap DNS seeders.
+- Persists discovered peers in `./data/mainnet/peers.redb`.
+- Runs the HTTP API on `0.0.0.0:5380` and `[::]:5380`.
+- DNS is **disabled** (no zone configured).
+- Generates an **ephemeral API key** at startup and prints it to the log — rotates on every restart. Pass `--api-key` to pin a stable key.
+
+This mode is useful for maintaining a local peer database, feeding a custom tool, or just exploring what's on the network.
+
+### Minimum: DNS seeder mode
 
 You need two pieces of DNS infrastructure in place before starting:
 
 1. A zone `NS` record that delegates a subdomain (e.g. `n-testnet-10.mydomain.org`) to the host running this seeder.
 2. A glue/`A` record for the nameserver name (e.g. `ns-testnet-10.mydomain.org`) pointing at the seeder's public IP.
 
-### Minimum configuration: public seeder with API key
-
 ```bash
 simply-kaspa-dnsseeder \
-  --network-id testnet-10 \
-  --dns-zone n-testnet-10.mydomain.org \
-  --dns-nameserver ns-testnet-10.mydomain.org \
-  --dns-listen 0.0.0.0:53 \
-  --http-listen 0.0.0.0:5381 \
-  --api-key "$(openssl rand -hex 32)"
+  --dns-zone seed.mydomain.org \
+  --dns-nameserver ns.mydomain.org
 ```
 
-That's the whole minimum: network, zone, nameserver FQDN, where to listen for DNS and HTTP, and an API key to protect the write side of the HTTP endpoint.
-
-- DNS server activates only when both `--dns-zone` and `--dns-nameserver` are set.
-- Binding port 53 typically needs `sudo` or `CAP_NET_BIND_SERVICE`.
-- When `--api-key` is set, every write endpoint and every per-peer lookup requires the `X-API-KEY: <key>` request header. `GET /api/peers` is always public but only includes the raw `ip` field for authenticated callers.
+- DNS is enabled as soon as both `--dns-zone` and `--dns-nameserver` are set.
+- The DNS server listens on `0.0.0.0:53` and `[::]:53` by default. Binding port 53 typically needs `sudo` or `CAP_NET_BIND_SERVICE`.
+- The HTTP API listens on `0.0.0.0:5380` and `[::]:5380` by default.
 
 ### HTTP endpoints
 
-All HTTP endpoints are served under the `--api-prefix` (default per `--help`); pass `--api-prefix ""` to serve at the root. Swagger UI is mounted at the prefix root (or `/swagger` when the prefix is empty).
+All endpoints are served under `--api-prefix` (default `/api`). Swagger UI is available at `http://host:5380/api`; pass `--api-prefix ""` to serve at the root (Swagger moves to `/swagger`).
 
 | Endpoint | Method | Auth | Description |
 | --- | --- | --- | --- |
 | `/api/health` | GET | — | `200 OK` while at least one peer succeeded inside `--stale-good`, otherwise `503` |
 | `/api/metrics` | GET | — | JSON dump: process (cpu/mem), disk usage, peer-store summary, per-subsystem counters |
-| `/api/peers` | GET | — | All peers as JSON, sorted by most-recent success first. `ip` is omitted unless authenticated |
+| `/api/peers` | GET | — | All peers sorted by most-recent success first. `ip` field is omitted unless authenticated |
 | `/api/peers` | POST | required | JSON body `{ "addrPort": "ip:port" }`; probes the peer and stores it on success (rate-limited per source IP) |
-| `/api/peers/{addr_port}` | GET | required | Single peer lookup. IPv6 must be bracketed, e.g. `[::1]:<port>` |
+| `/api/peers/{addr_port}` | GET | required | Single peer lookup. IPv6 must be bracketed: `[::1]:port` |
 | `/api/peers/{addr_port}` | DELETE | required | Remove a peer from the store. Returns `204` on success, `404` if absent |
 
-### Mainnet example
-
-```bash
-simply-kaspa-dnsseeder \
-  --network-id mainnet \
-  --dns-zone seed.mydomain.org \
-  --dns-nameserver ns.mydomain.org \
-  --strict-port \
-  --api-key "$(cat /etc/seeder/api.key)"
-```
-
-`--strict-port` is recommended on mainnet to filter out nodes listening on non-default ports.
+Note: "required" endpoints and the `ip` field on `GET /api/peers` require the `X-API-KEY: <key>` request header.
 
 ### Useful tuning flags
 
-| Flag | Purpose |
-| --- | --- |
-| `--threads` | Concurrent probe workers |
-| `--probes-per-peer` | Back-to-back `RequestAddresses` rounds per healthy probe |
-| `--probe-tick` | How often the crawler scans for eligible peers |
-| `--stale-good` | Re-probe interval for known-good peers (and DNS freshness window) |
-| `--stale-bad` | Re-probe interval for peers that have never succeeded |
-| `--dead-after` | Peers not seen for this long are pruned |
-| `--min-protocol-version` | Filter DNS answers by minimum protocol version |
-| `--min-user-agent` | Filter DNS answers by minimum kaspad semver |
-| `--datadir` | Persistent storage directory |
-| `--api-prefix` | URL prefix for HTTP endpoints (`""` serves at root) |
-| `--stats-interval` | Periodic in-process stats dump cadence; `0s` disables |
+| Flag | Default | Purpose |
+| --- | --- | --- |
+| `--threads` | `8` | Concurrent probe workers |
+| `--probes-per-peer` | `3` | Back-to-back `RequestAddresses` rounds per healthy probe |
+| `--probe-tick` | `5s` | How often the crawler scans for eligible peers |
+| `--stale-good` | `30m` | Re-probe interval for known-good peers (and DNS freshness window) |
+| `--stale-bad` | `2h` | Re-probe interval for peers that have never succeeded |
+| `--dead-after` | `7d` | Peers not seen for this long are pruned |
+| `--strict-port` | off | Reject addresses whose port differs from the network default |
+| `--min-protocol-version` | — | Filter DNS answers by minimum protocol version |
+| `--min-user-agent` | — | Filter DNS answers by minimum kaspad semver (e.g. `1.1.0`) |
+| `--datadir` | `data` | Persistent storage directory |
+| `--api-prefix` | `/api` | URL prefix for HTTP endpoints (`""` serves at root) |
+| `--stats-interval` | `1m` | Periodic in-process stats dump cadence; `0s` disables |
+| `--log-level` | `warn,...=info` | `env_logger` filter string |
 
-Run `simply-kaspa-dnsseeder --help` for current defaults and the full list.
+Run `simply-kaspa-dnsseeder --help` for the full list and current defaults.
 
 ## TLS / HTTPS
 
@@ -93,19 +136,10 @@ only one of the two is a startup error.
 
 ```bash
 simply-kaspa-dnsseeder \
-  --network-id mainnet \
-  --dns-zone seed.mydomain.org --dns-nameserver ns.mydomain.org \
-  --http-listen 0.0.0.0:5443 \
+  --dns-zone seed.mydomain.org \
+  --dns-nameserver ns.mydomain.org \
   --tls-cert /etc/letsencrypt/live/seed.mydomain.org/fullchain.pem \
   --tls-key  /etc/letsencrypt/live/seed.mydomain.org/privkey.pem
-```
-
-For a quick development cert:
-
-```bash
-openssl req -x509 -newkey rsa:4096 -nodes \
-  -keyout key.pem -out cert.pem -days 365 -subj "/CN=localhost"
-chmod 600 key.pem
 ```
 
 Notes:
