@@ -116,7 +116,7 @@ async fn run(cli: CliArgs) -> Result<()> {
         Some(tokio::spawn(async move {
             match simply_kaspa_dnsseeder_dns::run_dns_server_with_handler(handler, dns_listen, tcp_idle, dns_shutdown).await {
                 Ok(()) => info!("dns: shut down cleanly"),
-                Err(err) => error!("dns server exited: {err}"),
+                Err(err) => panic!("dns server exited: {err}"),
             }
         }))
     } else {
