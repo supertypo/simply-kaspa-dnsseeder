@@ -2,7 +2,9 @@ use crate::error::Error;
 use crate::filter::Filter;
 use crate::record::{NetAddress, PeerRecord};
 use log::{debug, warn};
-use redb::{Database, Durability, MultimapTableDefinition, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
+use redb::{
+    Builder, Database, Durability, MultimapTableDefinition, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
+};
 use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -15,6 +17,10 @@ const ATTEMPT_IDX: MultimapTableDefinition<i64, &[u8]> = MultimapTableDefinition
 
 /// Generic key/value table used for small persisted blobs (e.g. metrics snapshots).
 const KV: TableDefinition<&str, &[u8]> = TableDefinition::new("kv_v1");
+
+/// redb page-cache cap. The default (1 GiB) causes steady RSS growth; the peer
+/// dataset is small enough that 32 MiB is a comfortable ceiling.
+const DB_CACHE_BYTES: usize = 32 * 1024 * 1024;
 
 /// Aggregate store snapshot, computed by [`PeerStore::summary`]. Buckets are mutually
 /// exclusive over the peer set: `total == good + filtered + stale + failed + stub`.
@@ -67,7 +73,9 @@ impl PeerStore {
         {
             std::fs::create_dir_all(parent)?;
         }
-        let db = match Database::create(path) {
+        let mut builder = Builder::new();
+        builder.set_cache_size(DB_CACHE_BYTES);
+        let db = match builder.create(path) {
             Ok(db) => db,
             Err(err) if is_incompatible_db(&err) => {
                 warn!(
@@ -75,7 +83,7 @@ impl PeerStore {
                     path.display()
                 );
                 std::fs::remove_file(path)?;
-                Database::create(path)?
+                builder.create(path)?
             }
             Err(err) => return Err(err.into()),
         };
