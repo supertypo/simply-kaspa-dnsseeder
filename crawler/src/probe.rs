@@ -29,6 +29,10 @@ const TERMINATE_GRACE: Duration = Duration::from_secs(2);
 #[async_trait]
 pub trait Probe: Send + Sync {
     async fn probe(&self, addr: SocketAddr) -> Result<ProbeResult, ProbeError>;
+    /// Number of peers currently tracked by the underlying Hub. Returns 0 for mock impls.
+    fn active_peers_len(&self) -> usize {
+        0
+    }
     /// Terminate all in-flight peer connections owned by the probe. Default is a no-op.
     async fn close(&self) {}
 }
@@ -85,9 +89,14 @@ impl Probe for KaspadProbe {
 
         // `connect_peer` returns only after `HubEvent::NewPeer` is queued, so
         // `terminate` here pushes `PeerClosing` after `NewPeer` and the router
-        // is correctly removed from `Hub.peers`. The outer timeout prevents a
-        // hung remote from stalling us indefinitely.
-        let _ = tokio::time::timeout(TERMINATE_GRACE, self.adaptor.terminate(peer_key)).await;
+        // is correctly removed from `Hub.peers`.
+        let adaptor = self.adaptor.clone();
+        let terminate_task = tokio::spawn(async move {
+            adaptor.terminate(peer_key).await;
+        });
+        if tokio::time::timeout(TERMINATE_GRACE, terminate_task).await.is_err() {
+            warn!("crawler: probe {addr}: terminate exceeded {TERMINATE_GRACE:?}, detaching close task");
+        }
 
         match outcome {
             Ok(Ok(res)) => res,
@@ -101,6 +110,10 @@ impl Probe for KaspadProbe {
                 Err(ProbeError::Timeout)
             }
         }
+    }
+
+    fn active_peers_len(&self) -> usize {
+        self.adaptor.active_peers_len()
     }
 
     async fn close(&self) {

@@ -527,6 +527,30 @@ async fn responses_have_default_cache_control() {
 }
 
 #[tokio::test]
+async fn metrics_service_uses_new_uptime_fields() {
+    let (_temp, store) = seeded_store();
+    let state = make_state(Arc::new(MockProber::default()), store, "test-key");
+    let app = build_router(state);
+
+    let res = app.oneshot(Request::get("/metrics").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let body = to_bytes(res.into_body(), 64 * 1024).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let service = &json["service"];
+
+    assert!(service.get("uptime").and_then(serde_json::Value::as_u64).is_some());
+    assert!(
+        service
+            .get("uptimePretty")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|v| !v.is_empty())
+    );
+    assert!(service.get("uptimeMs").is_none());
+    assert!(service.get("uptimeSecs").is_none());
+}
+
+#[tokio::test]
 async fn delete_peer_requires_api_key() {
     let (_temp, store) = seeded_store();
     let state = make_state(Arc::new(MockProber::default()), store, "secret");

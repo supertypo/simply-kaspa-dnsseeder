@@ -11,6 +11,7 @@ pub struct CrawlerSubsystem {
     pub ok: u64,
     pub failed: u64,
     pub in_flight: u64,
+    pub hub_peers: usize,
     pub failed_connect: u64,
     pub failed_handshake: u64,
     pub failed_addresses: u64,

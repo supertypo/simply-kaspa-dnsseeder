@@ -255,8 +255,9 @@ impl Scheduler {
             self.metrics.record_skipped_backpressure(skipped_backpressure);
         }
         debug!(
-            "crawler: probe tick (index_scanned={scanned}, dispatched={dispatched}, skipped_backpressure={skipped_backpressure}, in_flight={})",
-            pool.in_flight_len()
+            "crawler: probe tick (index_scanned={scanned}, dispatched={dispatched}, skipped_backpressure={skipped_backpressure}, in_flight={}, hub_peers={})",
+            pool.in_flight_len(),
+            self.probe.active_peers_len(),
         );
         Ok(())
     }

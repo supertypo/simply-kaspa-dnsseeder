@@ -175,6 +175,7 @@ async fn run(cli: CliArgs) -> Result<()> {
     let prober = Arc::new(SchedulerProber::new(probe.clone(), store.clone()));
     let metrics_source: Arc<dyn MetricsSource> = Arc::new(SubsystemMetrics {
         crawler: metrics.crawler.clone(),
+        probe: probe.clone(),
         dns: metrics.dns.clone(),
         dns_limiter: dns_limiter.clone(),
         serving_cache: serving_cache_handle.clone(),

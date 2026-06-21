@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use simply_kaspa_dnsseeder_common::{RateLimiter, now_ms};
-use simply_kaspa_dnsseeder_crawler::CrawlerMetrics;
+use simply_kaspa_dnsseeder_crawler::{CrawlerMetrics, Probe};
 use simply_kaspa_dnsseeder_dns::{DnsMetrics, ServingCache};
 use simply_kaspa_dnsseeder_web::MetricsSource;
 use simply_kaspa_dnsseeder_web::dto::SubsystemMap;
@@ -13,6 +13,7 @@ use simply_kaspa_dnsseeder_web::dto::subsystems::{CrawlerSubsystem, DnsRateLimit
 
 pub struct SubsystemMetrics {
     pub crawler: Arc<CrawlerMetrics>,
+    pub probe: Arc<dyn Probe>,
     pub dns: Arc<DnsMetrics>,
     pub dns_limiter: Option<Arc<RateLimiter>>,
     pub serving_cache: Option<Arc<ServingCache>>,
@@ -26,6 +27,7 @@ impl MetricsSource for SubsystemMetrics {
             ok: c.ok,
             failed: c.failed,
             in_flight: c.in_flight,
+            hub_peers: self.probe.active_peers_len(),
             failed_connect: c.failed_connect,
             failed_handshake: c.failed_handshake,
             failed_addresses: c.failed_addresses,

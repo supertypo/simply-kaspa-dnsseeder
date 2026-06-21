@@ -32,9 +32,9 @@ pub struct ServiceInfo {
     pub version: String,
     pub commit: String,
     pub network: String,
-    pub uptime_secs: u64,
     #[schema(value_type = u64)]
-    pub uptime_ms: u128,
+    pub uptime: u128,
+    pub uptime_pretty: String,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
