@@ -9,6 +9,7 @@ ARG REPO_DIR=.
 RUN apk --no-cache add \
   musl-dev \
   g++ \
+  make \
   linux-headers \
   git \
   protoc \
