@@ -2,6 +2,10 @@
 //! together. Logging, signal handling and a graceful shutdown broadcast
 //! are managed here; everything domain-specific lives in the library crates.
 
+use tikv_jemallocator::Jemalloc;
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 mod metrics_source;
 mod network_gate;
 #[cfg(test)]

@@ -18,6 +18,8 @@ simply-kaspa-dnsseeder-crawler.workspace = true
 simply-kaspa-dnsseeder-dns.workspace = true
 simply-kaspa-dnsseeder-web.workspace = true
 
+tikv-jemallocator.workspace = true
+
 kaspa-consensus-core.workspace = true
 
 tokio.workspace = true
