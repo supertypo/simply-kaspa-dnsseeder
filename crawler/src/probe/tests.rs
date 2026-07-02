@@ -7,8 +7,10 @@ use tokio::net::TcpListener;
 use crate::probe::initializer::ProbeInitializerConfig;
 use crate::probe::{KaspadProbe, Probe};
 
-/// Bind a listener that accepts but never speaks h2 — the gRPC client hangs
-/// past `probe_timeout`, forcing the timeout-and-cleanup path.
+/// Bind a listener that accepts TCP but never speaks h2. The failure is driven
+/// by tonic's internal `communication_timeout` (10 s in `ConnectionHandler`), not
+/// by an outer `connect_budget` timeout — the latter was removed because it
+/// cancelled the future mid-handshake and orphaned the router's receive-loop task.
 async fn black_hole_listener() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -31,9 +33,12 @@ async fn timeout_returns_within_budget_and_cleans_pending() {
     let elapsed = start.elapsed();
 
     assert!(res.is_err(), "expected error against a black-hole listener, got {res:?}");
+    // Failure is driven by tonic's communication_timeout (10 s in ConnectionHandler).
+    // The probe must return well before that plus slack, but is no longer bounded by
+    // probe_timeout (which only controls do_probe step timeouts, not the h2 layer).
     assert!(
-        elapsed < Duration::from_secs(4),
-        "probe took {elapsed:?}; must return within probe_timeout + TERMINATE_GRACE + slack"
+        elapsed < Duration::from_secs(13),
+        "probe took {elapsed:?}; h2 communication_timeout (10 s) + slack should have fired"
     );
     assert_eq!(probe.pending_len(), 0, "pending map leaked entries");
 }

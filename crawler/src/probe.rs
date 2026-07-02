@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use dashmap::DashMap;
@@ -40,21 +40,15 @@ pub trait Probe: Send + Sync {
 pub struct KaspadProbe {
     adaptor: Arc<Adaptor>,
     pending: PendingMap,
-    probe_timeout: Duration,
 }
 
 impl KaspadProbe {
     #[must_use]
     pub fn new(config: ProbeInitializerConfig) -> Self {
-        let probe_timeout = config.probe_timeout;
         let pending: PendingMap = Arc::new(DashMap::new());
         let initializer = Arc::new(ProbeInitializer::new(config, pending.clone()));
         let adaptor = Adaptor::client_only(Hub::new(), initializer, Arc::new(TowerConnectionCounters::default()));
-        Self {
-            adaptor,
-            pending,
-            probe_timeout,
-        }
+        Self { adaptor, pending }
     }
 
     #[cfg(test)]
@@ -66,26 +60,17 @@ impl KaspadProbe {
 #[async_trait]
 impl Probe for KaspadProbe {
     async fn probe(&self, addr: SocketAddr) -> Result<ProbeResult, ProbeError> {
-        let deadline = Instant::now() + self.probe_timeout;
         let (tx, rx) = oneshot::channel();
         self.pending.insert(addr, tx);
 
-        let connect_budget = deadline.saturating_duration_since(Instant::now());
-        let peer_key = match tokio::time::timeout(connect_budget, self.adaptor.connect_peer(addr.to_string())).await {
-            Ok(Ok(k)) => k,
-            Ok(Err(err)) => {
+        let peer_key = match self.adaptor.connect_peer(addr.to_string()).await {
+            Ok(k) => k,
+            Err(err) => {
                 self.pending.remove(&addr);
                 return Err(ProbeError::Connection(err.to_string()));
             }
-            Err(_) => {
-                self.pending.remove(&addr);
-                warn!("crawler: probe {addr}: connect timeout");
-                return Err(ProbeError::Timeout);
-            }
         };
-
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        let outcome = tokio::time::timeout(remaining, rx).await;
+        let outcome = rx.await;
 
         // `connect_peer` returns only after `HubEvent::NewPeer` is queued, so
         // `terminate` here pushes `PeerClosing` after `NewPeer` and the router
@@ -98,17 +83,11 @@ impl Probe for KaspadProbe {
             warn!("crawler: probe {addr}: terminate exceeded {TERMINATE_GRACE:?}, detaching close task");
         }
 
-        match outcome {
-            Ok(Ok(res)) => res,
-            Ok(Err(_)) => {
-                self.pending.remove(&addr);
-                Err(ProbeError::Handshake("probe outcome channel dropped".into()))
-            }
-            Err(_) => {
-                self.pending.remove(&addr);
-                warn!("crawler: probe {addr}: overall timeout, dropping pending entry");
-                Err(ProbeError::Timeout)
-            }
+        if let Ok(res) = outcome {
+            res
+        } else {
+            self.pending.remove(&addr);
+            Err(ProbeError::Handshake("probe outcome channel dropped".into()))
         }
     }
 
