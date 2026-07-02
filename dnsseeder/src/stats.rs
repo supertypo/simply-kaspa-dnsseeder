@@ -1,9 +1,7 @@
-//! Periodic stats dump. Subsystem counters persist across restarts (the last unflushed
-//! interval may be lost on crash).
+//! Periodic stats dump.
 
 mod format;
 mod render;
-mod snapshot;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -22,7 +20,6 @@ use self::render::{Block, render};
 
 pub(super) struct MetricsReport {
     block: Block,
-    now_ms: i64,
 }
 
 impl MetricsReport {
@@ -66,10 +63,6 @@ impl Metrics {
         })
     }
 
-    pub fn load_from(&self, store: &PeerStore) {
-        snapshot::load(store, &self.crawler, &self.dns, &self.web);
-    }
-
     /// Gather a snapshot of subsystem counters plus a one-pass store summary.
     fn snapshot(&self, store: &PeerStore) -> Option<MetricsReport> {
         let now = now_ms();
@@ -103,7 +96,7 @@ impl Metrics {
             dns: self.dns.snapshot(),
             web: self.web.snapshot(),
         };
-        Some(MetricsReport { block, now_ms: now })
+        Some(MetricsReport { block })
     }
 
     pub fn dump(&self, store: &PeerStore) {
@@ -111,7 +104,6 @@ impl Metrics {
         for line in report.render() {
             info!("{line}");
         }
-        snapshot::save(store, &report.block.crawler, &report.block.dns, &report.block.web, report.now_ms);
     }
 }
 

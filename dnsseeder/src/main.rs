@@ -68,7 +68,6 @@ async fn run(cli: CliArgs) -> Result<()> {
         strict_default_port: cli.crawler.strict_port.then_some(default_port),
     };
     let metrics = Metrics::new(network_id, CliArgs::version(), cli.crawler.stale_good, validity);
-    metrics.load_from(&store);
 
     let probe_cfg = ProbeInitializerConfig::new(network_id, cli.crawler.probe_timeout, cli.crawler.probes_per_peer);
     let probe = Arc::new(KaspadProbe::new(probe_cfg));
