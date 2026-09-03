@@ -1,6 +1,11 @@
 name: Release binaries
 
 on:
+  # Pushes to main only warm the build cache: release-tag runs can restore caches created on the
+  # default branch, but not caches created on other tags, so releases would otherwise always build cold.
+  push:
+    branches:
+      - main
   release:
     types: [ published ]
 
@@ -30,6 +35,12 @@ jobs:
           sudo apt update
           sudo apt install -y pkg-config libssl-dev libpq-dev gcc protobuf-compiler
 
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          # The job id is shared by both matrix entries; key the cache per target.
+          key: ${{ matrix.target }}
+
       - name: Get binary name
         run: echo "BIN_NAME=$(grep -m1 '^name' dnsseeder/Cargo.toml | sed 's/name = "\(.*\)"/\1/')" >> $GITHUB_ENV
 
@@ -39,6 +50,7 @@ jobs:
           cargo build --release --target ${{ matrix.target }}
 
       - name: Compress binary with arch suffix
+        if: github.event_name == 'release'
         run: |
           BIN=target/${{ matrix.target }}/release/${{ env.BIN_NAME }}
           chmod 755 "$BIN"
@@ -46,6 +58,7 @@ jobs:
           gzip -f "${{ env.BIN_NAME }}-${{ matrix.arch }}"
 
       - name: Upload release asset
+        if: github.event_name == 'release'
         uses: softprops/action-gh-release@v1
         with:
           files: ${{ env.BIN_NAME }}-${{ matrix.arch }}.gz

@@ -64,6 +64,13 @@ jobs:
           build-args: |
             RUST_VERSION=${{ env.RUST_VERSION }}
             VERSION=${{ env.GIT_VERSION }}
+          # Re-resolve the base image tag every run so a new upstream image invalidates cached layers.
+          pull: true
+          # Layer cache in the GitHub Actions cache; one scope per platform so the matrix jobs don't overwrite each other.
+          # Release-tag runs restore from the default branch's cache but never save: a cache written on a tag ref
+          # is only visible to that same tag, so it would just take up space.
+          cache-from: type=gha,scope=${{ env.PLATFORM_PAIR }}
+          cache-to: ${{ github.event_name != 'release' && format('type=gha,scope={0},mode=max', env.PLATFORM_PAIR) || '' }}
           outputs: type=image,"name=${{ vars.DOCKER_REPO }}",push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
