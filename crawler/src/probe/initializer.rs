@@ -24,8 +24,20 @@ const USER_AGENT: &str = "/simply-kaspa-dnsseeder:0.1.0/";
 /// Matches the legacy Go seeder so peers see the same cadence.
 const PROBE_REPEAT_DELAY: Duration = Duration::from_millis(250);
 
-pub(crate) type ProbeChannel = oneshot::Sender<Result<ProbeResult, ProbeError>>;
+/// Handshake outcome handed back to `probe()`. Carries the router so the
+/// probe can close the connection itself instead of going through
+/// `Hub::terminate`, which only closes routers already registered in the Hub.
+pub struct ProbeOutcome {
+    pub router: Arc<Router>,
+    pub result: Result<ProbeResult, ProbeError>,
+}
+
+pub(crate) type ProbeChannel = oneshot::Sender<ProbeOutcome>;
 pub(crate) type PendingMap = Arc<DashMap<std::net::SocketAddr, ProbeChannel>>;
+
+/// Slack added on top of the worst-case handshake duration when computing the
+/// connection lifetime cap. Covers tonic's connect budget and scheduling delay.
+const LIFETIME_SLACK: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
 pub struct ProbeInitializerConfig {
@@ -43,6 +55,17 @@ impl ProbeInitializerConfig {
             probe_timeout,
             probes_per_peer,
         }
+    }
+
+    /// Upper bound on how long a single probe connection may stay open. The
+    /// handshake waits on four messages (`Version`, `Verack`, `Ready`, `RequestAddresses`)
+    /// plus one Addresses reply per round, each bounded by `probe_timeout`.
+    /// Anything still open past this point is a stalled connection and gets
+    /// force-closed by the watchdog spawned in `initialize_connection`.
+    #[must_use]
+    pub fn max_connection_lifetime(&self) -> Duration {
+        let rounds = u32::from(self.probes_per_peer.max(1));
+        self.probe_timeout * (4 + rounds) + PROBE_REPEAT_DELAY * rounds + LIFETIME_SLACK
     }
 }
 
@@ -209,18 +232,22 @@ impl ProbeInitializer {
 impl ConnectionInitializer for ProbeInitializer {
     async fn initialize_connection(&self, router: Arc<Router>) -> Result<(), ProtocolError> {
         let addr = router.net_address();
+        spawn_lifetime_watchdog(&router, self.config.max_connection_lifetime());
         let result = self.do_probe(&router).await;
         let sender = self.pending.remove(&addr).map(|(_, tx)| tx);
         // Do NOT close the router here: `initialize_connection` runs BEFORE
         // the connection handler queues `HubEvent::NewPeer`, so a close at this
         // point would push `PeerClosing` ahead of `NewPeer` and the Hub would
-        // leak the router. `probe.rs` terminates after `connect_peer` returns,
-        // which is after `NewPeer` is queued.
+        // keep a dead router. Instead the router is handed to `probe.rs`, which
+        // closes it after `connect_peer` returns (i.e. after `NewPeer` is queued).
 
         match result {
             Ok(probe_result) => {
                 if let Some(tx) = sender {
-                    let _ = tx.send(Ok(probe_result));
+                    let _ = tx.send(ProbeOutcome {
+                        router,
+                        result: Ok(probe_result),
+                    });
                 }
                 Ok(())
             }
@@ -234,7 +261,10 @@ impl ConnectionInitializer for ProbeInitializer {
                         },
                         other => ProbeError::Handshake(other.to_string()),
                     };
-                    let _ = tx.send(Err(probe_err));
+                    let _ = tx.send(ProbeOutcome {
+                        router,
+                        result: Err(probe_err),
+                    });
                 }
                 warn!("crawler: probe {addr}: failed during initializer: {err}");
                 Err(err)
@@ -304,4 +334,23 @@ fn spawn_route_drain(routes: Vec<IncomingRoute>) {
     for mut route in routes {
         tokio::spawn(async move { while route.recv().await.is_some() {} });
     }
+}
+
+/// Backstop against connections that outlive the probe: the probe future being
+/// cancelled mid-handshake, a close that never reached the router, or a peer
+/// that keeps the stream open. Holds only a `Weak` so a router that was closed
+/// and dropped normally costs nothing beyond the sleeping timer.
+fn spawn_lifetime_watchdog(router: &Arc<Router>, lifetime: Duration) {
+    let weak = Arc::downgrade(router);
+    tokio::spawn(async move {
+        tokio::time::sleep(lifetime).await;
+        if let Some(router) = weak.upgrade()
+            && router.close().await
+        {
+            warn!(
+                "crawler: probe {}: connection still open after {lifetime:?}, force-closed by watchdog",
+                router.net_address()
+            );
+        }
+    });
 }

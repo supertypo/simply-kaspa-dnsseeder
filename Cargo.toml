@@ -102,3 +102,6 @@ vergen-git2 = "10.0.0-beta.8"
 # Test-only
 tempfile = "3.27.0"
 tokio-test = "0.4.5"
+# Fake kaspad peer for crawler leak-regression tests (gzip: kaspa-p2p-lib clients send compressed streams).
+tonic = { version = "0.14.6", features = ["gzip"] }
+tokio-stream = "0.1.18"

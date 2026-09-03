@@ -6,16 +6,18 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use kaspa_p2p_lib::{Adaptor, Hub};
 use kaspa_utils_tower::counters::TowerConnectionCounters;
-use log::warn;
+use log::{debug, warn};
 use tokio::sync::oneshot;
 
 use crate::error::ProbeError;
 use crate::model::ProbeResult;
-use crate::probe::initializer::{PendingMap, ProbeInitializer, ProbeInitializerConfig};
+use crate::probe::initializer::{PendingMap, ProbeInitializer, ProbeInitializerConfig, ProbeOutcome};
 
 pub mod initializer;
 pub mod runner;
 
+#[cfg(test)]
+mod fake_peer;
 #[cfg(test)]
 mod initializer_tests;
 #[cfg(test)]
@@ -23,8 +25,8 @@ mod runner_tests;
 #[cfg(test)]
 mod tests;
 
-// Bound on the post-probe peer shutdown so a hung peer can't stall the caller.
-const TERMINATE_GRACE: Duration = Duration::from_secs(2);
+// Bound on the post-probe router close so a saturated Hub channel can't stall the caller.
+const CLOSE_GRACE: Duration = Duration::from_secs(2);
 
 #[async_trait]
 pub trait Probe: Send + Sync {
@@ -57,38 +59,55 @@ impl KaspadProbe {
     }
 }
 
+struct PendingGuard<'a> {
+    pending: &'a PendingMap,
+    addr: SocketAddr,
+}
+
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        self.pending.remove(&self.addr);
+    }
+}
+
 #[async_trait]
 impl Probe for KaspadProbe {
     async fn probe(&self, addr: SocketAddr) -> Result<ProbeResult, ProbeError> {
         let (tx, rx) = oneshot::channel();
         self.pending.insert(addr, tx);
-
-        let peer_key = match self.adaptor.connect_peer(addr.to_string()).await {
-            Ok(k) => k,
-            Err(err) => {
-                self.pending.remove(&addr);
-                return Err(ProbeError::Connection(err.to_string()));
-            }
+        // Clears the entry on every exit path, including this future being cancelled
+        // mid-handshake (the initializer normally removes it, making this a no-op).
+        let _pending_guard = PendingGuard {
+            pending: &self.pending,
+            addr,
         };
-        let outcome = rx.await;
 
-        // `connect_peer` returns only after `HubEvent::NewPeer` is queued, so
-        // `terminate` here pushes `PeerClosing` after `NewPeer` and the router
-        // is correctly removed from `Hub.peers`.
-        let adaptor = self.adaptor.clone();
-        let terminate_task = tokio::spawn(async move {
-            adaptor.terminate(peer_key).await;
+        if let Err(err) = self.adaptor.connect_peer(addr.to_string()).await {
+            // The connection handler already closed the router on this path.
+            return Err(ProbeError::Connection(err.to_string()));
+        }
+        let Ok(ProbeOutcome { router, result }) = rx.await else {
+            return Err(ProbeError::Handshake("probe outcome channel dropped".into()));
+        };
+
+        // Close the router directly rather than via `Adaptor::terminate`: the
+        // latter only closes routers already inserted into `Hub.peers`, and the
+        // Hub event loop has usually not processed `NewPeer` yet at this point,
+        // making it a silent no-op that leaves the connection open forever.
+        // `connect_peer` returns only after `NewPeer` is queued, so the
+        // `PeerClosing` sent by `close()` is ordered after it and the Hub entry
+        // is removed. `close()` tears down the routes synchronously and only
+        // awaits on the Hub channel, so a detached close still frees the socket.
+        let close_task = tokio::spawn(async move {
+            if !router.close().await {
+                debug!("crawler: probe {}: router was already closed by the peer", router.net_address());
+            }
         });
-        if tokio::time::timeout(TERMINATE_GRACE, terminate_task).await.is_err() {
-            warn!("crawler: probe {addr}: terminate exceeded {TERMINATE_GRACE:?}, detaching close task");
+        if tokio::time::timeout(CLOSE_GRACE, close_task).await.is_err() {
+            warn!("crawler: probe {addr}: router close exceeded {CLOSE_GRACE:?}, detaching close task");
         }
 
-        if let Ok(res) = outcome {
-            res
-        } else {
-            self.pending.remove(&addr);
-            Err(ProbeError::Handshake("probe outcome channel dropped".into()))
-        }
+        result
     }
 
     fn active_peers_len(&self) -> usize {
