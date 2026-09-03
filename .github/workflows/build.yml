@@ -1,16 +1,49 @@
-name: Release binaries
+name: Build
 
 on:
-  # Pushes to main only warm the build cache: release-tag runs can restore caches created on the
-  # default branch, but not caches created on other tags, so releases would otherwise always build cold.
   push:
     branches:
-      - main
+      - "**"
+  pull_request:
   release:
     types: [ published ]
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  build-and-upload:
+  check:
+    if: github.event_name != 'release'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y pkg-config libssl-dev protobuf-compiler
+
+      # rustup picks the toolchain from rust-toolchain.toml; make sure the extra components are present.
+      - name: Install toolchain components
+        run: rustup component add rustfmt clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+  # Runs on pushes to main only to keep the cargo cache warm: release-tag runs can restore caches created
+  # on the default branch, but not caches created on other tags, so releases would otherwise always build cold.
+  binaries:
+    if: github.event_name == 'release' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
