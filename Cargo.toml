@@ -69,7 +69,7 @@ hickory-proto = "0.26.1"
 hickory-resolver = "0.26.1"
 
 # Persistence
-redb = "4.1.0"
+redb = "4.2.0"
 # bincode 3.0.0 is intentionally unmaintained (upstream ships only a compiler error); stay on 2.x.
 bincode = { version = "2.0.1", features = ["serde"] }
 
