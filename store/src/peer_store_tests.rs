@@ -180,6 +180,50 @@ fn insert_or_refresh_seen_bumps_only_last_seen_on_existing_record() {
 }
 
 #[test]
+fn insert_or_refresh_seen_batch_mixes_new_and_existing() {
+    let (_dir, store) = open_temp_store();
+    let existing = make_rec(1, Ipv4Addr::new(9, 9, 9, 9), 16111, 100);
+    store.upsert(&existing).unwrap();
+    let fresh = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(9, 9, 9, 10)),
+        port: 16111,
+    };
+
+    let inserted = store.insert_or_refresh_seen_batch(&[existing.address, fresh], 600).unwrap();
+
+    assert_eq!(inserted, 1, "only the unknown address is a new stub");
+    let refreshed = store.get(&existing.address).unwrap().unwrap();
+    assert_eq!(refreshed.last_seen_ms, 600);
+    assert_eq!(refreshed.id, existing.id, "id preserved");
+    assert_eq!(refreshed.last_attempt_ms, existing.last_attempt_ms, "last_attempt untouched");
+    let stub = store.get(&fresh).unwrap().expect("stub present");
+    assert_eq!(stub.id, UNKNOWN_PEER_ID);
+    assert_eq!(stub.first_seen_ms, 600);
+    assert_eq!(stub.last_success_ms, 0);
+}
+
+#[test]
+fn insert_or_refresh_seen_batch_counts_a_repeated_address_once() {
+    let (_dir, store) = open_temp_store();
+    let addr = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(9, 9, 9, 11)),
+        port: 16111,
+    };
+
+    let inserted = store.insert_or_refresh_seen_batch(&[addr, addr], 100).unwrap();
+
+    assert_eq!(inserted, 1, "a duplicate in one batch is not a second stub");
+    assert_eq!(store.len().unwrap(), 1);
+}
+
+#[test]
+fn insert_or_refresh_seen_batch_accepts_an_empty_slice() {
+    let (_dir, store) = open_temp_store();
+    assert_eq!(store.insert_or_refresh_seen_batch(&[], 100).unwrap(), 0);
+    assert_eq!(store.len().unwrap(), 0);
+}
+
+#[test]
 fn insert_or_refresh_seen_rescues_record_from_prune() {
     let (_dir, store) = open_temp_store();
     // A stale peer that would otherwise be pruned at cutoff 500.

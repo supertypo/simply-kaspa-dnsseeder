@@ -18,7 +18,7 @@ use std::time::Duration;
 use dashmap::DashSet;
 use kaspa_consensus_core::network::NetworkId;
 use log::{debug, info, warn};
-use simply_kaspa_dnsseeder_store::PeerStore;
+use simply_kaspa_dnsseeder_store::{NetAddress, PeerStore};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -265,20 +265,25 @@ impl Scheduler {
 
 async fn insert_bootstrap_stubs(store: &PeerStore, addrs: Vec<SocketAddr>, default_port: u16, strict_port: bool) -> usize {
     let now = now_ms();
-    let mut inserted = 0usize;
-    for addr in addrs {
-        let net = net_from(addr);
-        if !is_acceptable_address(&net, default_port, strict_port) {
-            debug!("crawler: rejected bootstrap address {addr}");
-            continue;
-        }
-        match store.blocking(move |s| s.insert_or_refresh_seen(&net, now)).await {
-            Ok(true) => inserted += 1,
-            Ok(false) => {}
-            Err(err) => warn!("crawler: failed to seed bootstrap address {addr}: {err}"),
+    let accepted: Vec<NetAddress> = addrs
+        .into_iter()
+        .filter_map(|addr| {
+            let net = net_from(addr);
+            if is_acceptable_address(&net, default_port, strict_port) {
+                Some(net)
+            } else {
+                debug!("crawler: rejected bootstrap address {addr}");
+                None
+            }
+        })
+        .collect();
+    match store.blocking(move |s| s.insert_or_refresh_seen_batch(&accepted, now)).await {
+        Ok(inserted) => inserted,
+        Err(err) => {
+            warn!("crawler: failed to seed bootstrap addresses: {err}");
+            0
         }
     }
-    inserted
 }
 
 async fn prune_once(store: &PeerStore, dead_after_ms: i64, dead_after: Duration) {

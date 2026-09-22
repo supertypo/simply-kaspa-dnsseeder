@@ -92,24 +92,25 @@ pub(crate) async fn apply_success(
 /// otherwise bumping `last_seen_ms`) and return the count of newly inserted records.
 async fn insert_discovered_stubs(store: &PeerStore, addresses: Vec<(IpAddress, u16)>, default_port: u16, strict_port: bool) -> usize {
     let now = now_ms();
-    store
-        .blocking(move |s| {
-            let mut inserted = 0usize;
-            for (ip_addr, port) in &addresses {
-                let port = if *port == 0 { default_port } else { *port };
-                let ip: std::net::IpAddr = (*ip_addr).into();
-                let canonical = canonicalize_ip(ip);
-                let net = NetAddress { ip: canonical, port };
-                if !is_acceptable_address(&net, default_port, strict_port) {
-                    continue;
-                }
-                match s.insert_or_refresh_seen(&net, now) {
-                    Ok(true) => inserted += 1,
-                    Ok(false) => {}
-                    Err(err) => warn!("crawler: failed to seed discovered address {canonical}:{port}: {err}"),
-                }
+    let accepted: Vec<NetAddress> = addresses
+        .iter()
+        .map(|(ip_addr, port)| {
+            let port = if *port == 0 { default_port } else { *port };
+            let ip: std::net::IpAddr = (*ip_addr).into();
+            NetAddress {
+                ip: canonicalize_ip(ip),
+                port,
             }
-            inserted
+        })
+        .filter(|net| is_acceptable_address(net, default_port, strict_port))
+        .collect();
+    store
+        .blocking(move |s| match s.insert_or_refresh_seen_batch(&accepted, now) {
+            Ok(inserted) => inserted,
+            Err(err) => {
+                warn!("crawler: failed to seed {} discovered address(es): {err}", accepted.len());
+                0
+            }
         })
         .await
 }

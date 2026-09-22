@@ -19,12 +19,12 @@ The store (`store::PeerStore`, redb-backed) is the only shared state. There is n
 ## Tricky parts
 
 ### Discovery never enqueues directly
-When a probe succeeds and the peer advertises addresses, those addresses are written to the store via `PeerStore::insert_or_refresh_seen` and **nothing else**. The scheduler's `probe_tick` is the *only* code path that picks peers to probe. This is intentional — letting discovery enqueue caused ephemeral-port floods where one chatty peer could pin every worker.
+When a probe succeeds and the peer advertises addresses, those addresses are written to the store via `PeerStore::insert_or_refresh_seen_batch` and **nothing else**. The scheduler's `probe_tick` is the *only* code path that picks peers to probe. This is intentional — letting discovery enqueue caused ephemeral-port floods where one chatty peer could pin every worker.
 
 A "stub" record has `last_success_ms = 0` and `last_attempt_ms = 0`. The DNS filter rejects stubs (see eligibility filter), and the scheduler treats them as "never succeeded" peers for cadence purposes.
 
 ### `last_seen_ms` is the "seen in any capacity" timestamp / prune anchor
-`insert_or_refresh_seen` is the single entry point for every non-probe sighting — DNS-seeder bootstrap, `--seeder` arg, and peer-gossiped addresses from a successful probe. It creates a stub when missing and otherwise **only bumps `last_seen_ms`**, leaving `last_attempt_ms`, `last_success_ms`, `first_seen_ms`, the peer id and the attempt index untouched (so probe cadence and the "discovery never enqueues" invariant hold). `prune_dead` keys solely off `last_seen_ms`/`first_seen_ms`, so refreshing here keeps still-gossiped anchors from being pruned out from under the crawler after extended downtime — without making them DNS-servable (DNS keys off `last_success_ms`). Consequence: a peer the network keeps advertising is never pruned even if unreachable; it stays in the bad-class probe rotation but never reaches DNS. A failed direct probe is *not* a sighting — it bumps only `last_attempt_ms`.
+`insert_or_refresh_seen` and its batch form `insert_or_refresh_seen_batch` are the single entry point for every non-probe sighting — DNS-seeder bootstrap, `--seeder` arg, and peer-gossiped addresses from a successful probe. It creates a stub when missing and otherwise **only bumps `last_seen_ms`**, leaving `last_attempt_ms`, `last_success_ms`, `first_seen_ms`, the peer id and the attempt index untouched (so probe cadence and the "discovery never enqueues" invariant hold). `prune_dead` keys solely off `last_seen_ms`/`first_seen_ms`, so refreshing here keeps still-gossiped anchors from being pruned out from under the crawler after extended downtime — without making them DNS-servable (DNS keys off `last_success_ms`). Consequence: a peer the network keeps advertising is never pruned even if unreachable; it stays in the bad-class probe rotation but never reaches DNS. A failed direct probe is *not* a sighting — it bumps only `last_attempt_ms`.
 
 
 ### In-flight back-pressure
@@ -89,6 +89,8 @@ Every log line starts with the *owning* subsystem (`crawler:`, `dns:`, `web:`, `
 - Never run `cargo clean` — the rusty-kaspa git deps are expensive to rebuild.
 - Comments: only when the *why* is non-obvious. The code is the *what*. No step-by-step narration, no task/PR references, no "added for X" history.
 - One responsibility per file. Split when a module starts mixing concerns (the `web::http::handlers/`, `web::runtime/`, and `dnsseeder::stats/` splits are the templates). Use the modern `name.rs` + `name/` module pattern; no `mod.rs`.
+- Every store write commits durably. A `Durability::None` commit leaves its bookkeeping in redb's memory until a durable commit lands, so a non-durable hot path grows the process for as long as it runs. Batch writes instead of reaching for `set_durability` — that is why gossiped addresses go in through `insert_or_refresh_seen_batch`.
+- `Cargo.toml` patches `redb` to a branch of `supertypo/redb` that bounds the page cache's LRU queue. Stock redb queues a slot per insert rather than per cached page, which grows the process without bound. Drop the `[patch.crates-io]` section once the fix ships upstream.
 - Persisted store keys (redb table names, blob keys) are never versioned in their name. On an incompatible on-disk shape, warn and overwrite at read time; don't bump a `_v2` suffix.
 
 ## Keeping this document useful

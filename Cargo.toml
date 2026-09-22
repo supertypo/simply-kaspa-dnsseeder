@@ -69,7 +69,9 @@ hickory-proto = "0.26.1"
 hickory-resolver = "0.26.1"
 
 # Persistence
-redb = "4.2.0"
+# Patched below: stock redb grows its page-cache LRU queue without bound under a write-heavy
+# workload, which is what OOM-killed the seeder. See the [patch.crates-io] section.
+redb = "4.3.0"
 # bincode 3.0.0 is intentionally unmaintained (upstream ships only a compiler error); stay on 2.x.
 bincode = { version = "2.0.1", features = ["serde"] }
 
@@ -105,3 +107,9 @@ tokio-test = "0.4.5"
 # Fake kaspad peer for crawler leak-regression tests (gzip: kaspa-p2p-lib clients send compressed streams).
 tonic = { version = "0.14.6", features = ["gzip"] }
 tokio-stream = "0.1.18"
+
+# redb 4.3.0 plus a fix that bounds the page cache's LRU queue when a page is freed and
+# reinserted. Upstream keeps a queue slot per insert rather than per cached page, so the queue
+# grows for as long as the process writes. Drop this once the fix is released upstream.
+[patch.crates-io]
+redb = { git = "https://github.com/supertypo/redb.git", branch = "bounded-lru-queue" }

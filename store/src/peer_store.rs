@@ -2,9 +2,7 @@ use crate::error::Error;
 use crate::filter::Filter;
 use crate::record::{NetAddress, PeerRecord};
 use log::{debug, warn};
-use redb::{
-    Builder, Database, Durability, MultimapTableDefinition, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition,
-};
+use redb::{Builder, Database, MultimapTableDefinition, ReadableDatabase, ReadableTable, ReadableTableMetadata, TableDefinition};
 use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
@@ -208,18 +206,10 @@ impl PeerStore {
     }
 
     /// Record an attempt at `addr` taken at `now_ms`. Creates a stub if none
-    /// exists; otherwise only refreshes `last_attempt_ms`. Uses
-    /// `Durability::None` — losing the latest attempt on crash only
-    /// causes a slightly-early re-probe, far cheaper than fsync per probe.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `set_durability` is called after a table has been opened in the
-    /// transaction; this would indicate a programmer error in this method.
+    /// exists; otherwise only refreshes `last_attempt_ms`.
     pub fn record_attempt(&self, addr: &NetAddress, now_ms: i64) -> Result<PeerRecord, Error> {
         let key = encode_key(addr)?;
-        let mut txn = self.db.begin_write()?;
-        txn.set_durability(Durability::None).expect("durability set before any open_table");
+        let txn = self.db.begin_write()?;
         let rec = {
             let mut t = txn.open_table(PEERS)?;
             let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
@@ -270,48 +260,58 @@ impl PeerStore {
     /// still-gossiped peer from being pruned out from under the crawler without
     /// making it servable over DNS (which keys off `last_success_ms`).
     ///
-    /// Uses `Durability::None` — losing the latest bump on crash only risks a
-    /// slightly-early prune, far cheaper than fsync per gossiped address.
-    ///
     /// Returns `true` when a new stub was created, `false` when an existing
     /// record was refreshed.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `set_durability` is called after a table has been opened in the
-    /// transaction; this would indicate a programmer error in this method.
     pub fn insert_or_refresh_seen(&self, addr: &NetAddress, now_ms: i64) -> Result<bool, Error> {
-        let key = encode_key(addr)?;
-        let mut txn = self.db.begin_write()?;
-        txn.set_durability(Durability::None).expect("durability set before any open_table");
-        let inserted = {
+        Ok(self.insert_or_refresh_seen_batch(std::slice::from_ref(addr), now_ms)? == 1)
+    }
+
+    /// Mark every address in `addrs` as seen at `now_ms`, with the same per-address
+    /// semantics as [`PeerStore::insert_or_refresh_seen`]. Returns the number of new
+    /// stubs created. A failure rolls back the whole batch.
+    ///
+    /// One probe harvests up to a couple of thousand gossiped addresses, so writing
+    /// them per address made the store's transaction rate scale with addresses rather
+    /// than with probes, which in turn made durable commits look unaffordable. Batching
+    /// is what lets every write here be durable: redb holds the bookkeeping for each
+    /// `Durability::None` commit in memory until a durable commit lands, so a
+    /// non-durable hot path grows the process for as long as it runs.
+    pub fn insert_or_refresh_seen_batch(&self, addrs: &[NetAddress], now_ms: i64) -> Result<usize, Error> {
+        if addrs.is_empty() {
+            return Ok(0);
+        }
+        let txn = self.db.begin_write()?;
+        let mut inserted = 0usize;
+        {
             let mut t = txn.open_table(PEERS)?;
-            let existing = t.get(key.as_slice())?.map(|v| decode_record(v.value())).transpose()?;
-            if let Some(mut rec) = existing {
-                rec.last_seen_ms = now_ms;
-                let bytes = encode_record(&rec)?;
-                t.insert(key.as_slice(), bytes.as_slice())?;
-                false
-            } else {
-                let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
-                let rec = PeerRecord {
-                    id: UNKNOWN_PEER_ID,
-                    protocol_version: 0,
-                    timestamp_ms: 0,
-                    address: *addr,
-                    user_agent: String::new(),
-                    subnetwork_id: None,
-                    first_seen_ms: now_ms,
-                    last_attempt_ms: 0,
-                    last_success_ms: 0,
-                    last_seen_ms: now_ms,
-                };
-                let bytes = encode_record(&rec)?;
-                t.insert(key.as_slice(), bytes.as_slice())?;
-                idx.insert(0_i64, key.as_slice())?;
-                true
+            let mut idx = txn.open_multimap_table(ATTEMPT_IDX)?;
+            for addr in addrs {
+                let key = encode_key(addr)?;
+                let existing = t.get(key.as_slice())?.map(|v| decode_record(v.value())).transpose()?;
+                if let Some(mut rec) = existing {
+                    rec.last_seen_ms = now_ms;
+                    let bytes = encode_record(&rec)?;
+                    t.insert(key.as_slice(), bytes.as_slice())?;
+                } else {
+                    let rec = PeerRecord {
+                        id: UNKNOWN_PEER_ID,
+                        protocol_version: 0,
+                        timestamp_ms: 0,
+                        address: *addr,
+                        user_agent: String::new(),
+                        subnetwork_id: None,
+                        first_seen_ms: now_ms,
+                        last_attempt_ms: 0,
+                        last_success_ms: 0,
+                        last_seen_ms: now_ms,
+                    };
+                    let bytes = encode_record(&rec)?;
+                    t.insert(key.as_slice(), bytes.as_slice())?;
+                    idx.insert(0_i64, key.as_slice())?;
+                    inserted += 1;
+                }
             }
-        };
+        }
         txn.commit()?;
         Ok(inserted)
     }
