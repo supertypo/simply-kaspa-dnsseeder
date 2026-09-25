@@ -224,16 +224,28 @@ fn insert_or_refresh_seen_batch_accepts_an_empty_slice() {
 }
 
 #[test]
-fn insert_or_refresh_seen_rescues_record_from_prune() {
+fn insert_or_refresh_seen_rescues_never_answered_record_from_prune() {
     let (_dir, store) = open_temp_store();
-    // A stale peer that would otherwise be pruned at cutoff 500.
-    let r = make_rec(1, Ipv4Addr::new(8, 8, 8, 8), 16111, 100);
-    store.upsert(&r).unwrap();
-    // Re-seeing it (DNS seeder / gossip) refreshes last_seen past the cutoff.
-    assert!(!store.insert_or_refresh_seen(&r.address, 600).unwrap());
+    let addr = NetAddress {
+        ip: IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+        port: 16111,
+    };
+    store.insert_or_refresh_seen(&addr, 100).unwrap();
+    assert!(!store.insert_or_refresh_seen(&addr, 600).unwrap());
     let removed = store.prune_dead(500).unwrap();
     assert_eq!(removed, 0, "refreshed peer must survive prune");
-    assert!(store.get(&r.address).unwrap().is_some());
+    assert!(store.get(&addr).unwrap().is_some());
+}
+
+#[test]
+fn insert_or_refresh_seen_does_not_rescue_record_that_stopped_answering() {
+    let (_dir, store) = open_temp_store();
+    let r = make_rec(1, Ipv4Addr::new(8, 8, 8, 8), 16111, 100);
+    store.upsert(&r).unwrap();
+    assert!(!store.insert_or_refresh_seen(&r.address, 600).unwrap());
+    let removed = store.prune_dead(500).unwrap();
+    assert_eq!(removed, 1, "gossip must not keep an unreachable peer alive");
+    assert!(store.get(&r.address).unwrap().is_none());
 }
 
 #[test]
@@ -490,6 +502,12 @@ mod is_eligible_for_probe {
     fn past_dead_cutoff_not_eligible() {
         // Both first_seen and last_seen below cutoff → considered dead, skip.
         let r = rec(NOW - BAD - 1, 0, 100, 100);
+        assert!(!is_eligible(&r, NOW, GOOD, BAD, 1_000));
+    }
+
+    #[test]
+    fn gossiped_peer_that_stopped_answering_not_eligible() {
+        let r = rec(NOW - GOOD, 100, 100, NOW);
         assert!(!is_eligible(&r, NOW, GOOD, BAD, 1_000));
     }
 }

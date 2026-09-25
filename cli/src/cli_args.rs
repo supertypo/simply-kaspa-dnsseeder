@@ -82,7 +82,8 @@ pub struct CrawlerArgs {
     #[clap(long, default_value = "2h", value_parser = humantime::parse_duration)]
     pub stale_bad: Duration,
 
-    /// A peer is removed when `now - last_seen` exceeds this duration.
+    /// A peer is removed when `now - last_seen` exceeds this duration, or when it answered a
+    /// probe once and `now - last_success` exceeds it.
     #[clap(long, default_value = "7d", value_parser = humantime::parse_duration)]
     pub dead_after: Duration,
 

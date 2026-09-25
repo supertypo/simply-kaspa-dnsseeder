@@ -119,7 +119,7 @@ Note: "required" endpoints and the `ip` field on `GET /api/peers` require the `X
 | `--probe-tick` | `5s` | How often the crawler scans for eligible peers |
 | `--stale-good` | `30m` | Re-probe interval for known-good peers (and DNS freshness window) |
 | `--stale-bad` | `2h` | Re-probe interval for peers that have never succeeded |
-| `--dead-after` | `7d` | Peers not seen for this long are pruned |
+| `--dead-after` | `7d` | Peers not seen for this long, or not reached for this long after a first success, are pruned |
 | `--strict-port` | off | Reject addresses whose port differs from the network default |
 | `--min-protocol-version` | — | Filter DNS answers by minimum protocol version |
 | `--min-user-agent` | — | Filter DNS answers by minimum kaspad semver (e.g. `1.1.0`) |

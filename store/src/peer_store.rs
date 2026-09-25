@@ -256,9 +256,9 @@ impl PeerStore {
     /// `last_success_ms`, `first_seen_ms`, the peer id and the attempt index
     /// untouched so probe cadence and DNS eligibility are unaffected.
     ///
-    /// `last_seen_ms` is the sole anti-prune anchor: refreshing it here keeps a
-    /// still-gossiped peer from being pruned out from under the crawler without
-    /// making it servable over DNS (which keys off `last_success_ms`).
+    /// Refreshing `last_seen_ms` keeps a still-gossiped peer that never answered
+    /// from being pruned, without making it servable over DNS (which keys off
+    /// `last_success_ms`). It does not rescue a peer that once answered, see [`is_dead`].
     ///
     /// Returns `true` when a new stub was created, `false` when an existing
     /// record was refreshed.
@@ -391,8 +391,8 @@ impl PeerStore {
         Ok(out)
     }
 
-    /// Delete every record where both `last_seen_ms` and `first_seen_ms` are
-    /// older than `cutoff_ms`. Runs scan + delete in a single write transaction
+    /// Delete every record that [`is_dead`] at `cutoff_ms`. Runs scan + delete in a
+    /// single write transaction
     /// so a concurrent `record_attempt` cannot leave an orphan index entry.
     pub fn prune_dead(&self, cutoff_ms: i64) -> Result<usize, Error> {
         debug!("store: prune_dead scan (cutoff_ms={cutoff_ms})");
@@ -405,8 +405,7 @@ impl PeerStore {
             for entry in t.iter()? {
                 let (k, v) = entry?;
                 if let Ok(rec) = decode_record(v.value())
-                    && rec.last_seen_ms < cutoff_ms
-                    && rec.first_seen_ms < cutoff_ms
+                    && is_dead(&rec, cutoff_ms)
                 {
                     to_delete.push((k.value().to_vec(), rec.last_attempt_ms));
                 }
@@ -506,7 +505,7 @@ fn encode_key(addr: &NetAddress) -> Result<Vec<u8>, Error> {
 /// re-probe them before they tip into the unservable bracket.
 #[must_use]
 pub fn is_eligible_for_probe(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, stale_bad_ms: i64, dead_cutoff_ms: i64) -> bool {
-    if rec.last_seen_ms < dead_cutoff_ms && rec.first_seen_ms < dead_cutoff_ms {
+    if is_dead(rec, dead_cutoff_ms) {
         return false;
     }
     let since_attempt = now_ms.saturating_sub(rec.last_attempt_ms);
@@ -516,6 +515,17 @@ pub fn is_eligible_for_probe(rec: &PeerRecord, now_ms: i64, stale_good_ms: i64, 
         stale_bad_ms
     };
     since_attempt >= threshold
+}
+
+/// A peer that once answered a probe is dead when it has not answered since `cutoff_ms`,
+/// however often the network still gossips it. Other peers keep stale addresses in their
+/// address books for a long time, so `last_seen_ms` alone would keep it alive forever.
+#[must_use]
+pub fn is_dead(rec: &PeerRecord, cutoff_ms: i64) -> bool {
+    if rec.last_success_ms > 0 && rec.last_success_ms < cutoff_ms {
+        return true;
+    }
+    rec.last_seen_ms < cutoff_ms && rec.first_seen_ms < cutoff_ms
 }
 
 #[inline]

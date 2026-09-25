@@ -24,7 +24,7 @@ When a probe succeeds and the peer advertises addresses, those addresses are wri
 A "stub" record has `last_success_ms = 0` and `last_attempt_ms = 0`. The DNS filter rejects stubs (see eligibility filter), and the scheduler treats them as "never succeeded" peers for cadence purposes.
 
 ### `last_seen_ms` is the "seen in any capacity" timestamp / prune anchor
-`insert_or_refresh_seen` and its batch form `insert_or_refresh_seen_batch` are the single entry point for every non-probe sighting — DNS-seeder bootstrap, `--seeder` arg, and peer-gossiped addresses from a successful probe. It creates a stub when missing and otherwise **only bumps `last_seen_ms`**, leaving `last_attempt_ms`, `last_success_ms`, `first_seen_ms`, the peer id and the attempt index untouched (so probe cadence and the "discovery never enqueues" invariant hold). `prune_dead` keys solely off `last_seen_ms`/`first_seen_ms`, so refreshing here keeps still-gossiped anchors from being pruned out from under the crawler after extended downtime — without making them DNS-servable (DNS keys off `last_success_ms`). Consequence: a peer the network keeps advertising is never pruned even if unreachable; it stays in the bad-class probe rotation but never reaches DNS. A failed direct probe is *not* a sighting — it bumps only `last_attempt_ms`.
+`insert_or_refresh_seen` and its batch form `insert_or_refresh_seen_batch` are the single entry point for every non-probe sighting — DNS-seeder bootstrap, `--seeder` arg, and peer-gossiped addresses from a successful probe. It creates a stub when missing and otherwise **only bumps `last_seen_ms`**, leaving `last_attempt_ms`, `last_success_ms`, `first_seen_ms`, the peer id and the attempt index untouched (so probe cadence and the "discovery never enqueues" invariant hold). `store::is_dead` (used by `prune_dead` and probe eligibility) marks a peer dead when `last_seen_ms` and `first_seen_ms` are past the cutoff, or when it succeeded once and `last_success_ms` is past the cutoff. So gossip keeps a never-reached anchor alive after extended downtime, but it cannot keep a peer that stopped answering: kaspad address books gossip dead addresses for a long time, and `GET /peers?all=true` would list them indefinitely. If the network re-advertises a pruned peer, it returns as a stub. A failed direct probe is *not* a sighting — it bumps only `last_attempt_ms`.
 
 
 ### In-flight back-pressure
@@ -32,7 +32,7 @@ A "stub" record has `last_success_ms = 0` and `last_attempt_ms = 0`. The DNS fil
 
 ### Two-tier eligibility
 `store::is_eligible_for_probe` decides what to re-probe:
-- Past the dead cutoff (`--dead-after`): **never** — `prune_dead` will eventually delete it.
+- Dead per `store::is_dead` (`--dead-after`): **never** — `prune_dead` will eventually delete it.
 - Succeeded at least once: re-probe every `--stale-good`.
 - Never succeeded (stub or repeated failures): re-probe every `--stale-bad`.
 
